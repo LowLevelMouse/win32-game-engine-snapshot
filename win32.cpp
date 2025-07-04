@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdint.h>
 #include <xaudio2.h>
 #include <math.h>
@@ -9,14 +10,22 @@
 //turns multiple statements into one
 #define Assert(Expression) do { if (!(Expression)) { *(volatile int*)0 = 0; } } while(0)
 #define Check(Expression) do { if(!(Expression)) {return -1;} } while(0)
+#define Dialog(...) \
+	do\
+	{\
+		char _Buffer[256]; \
+		snprintf(_Buffer, sizeof(_Buffer), __VA_ARGS__); \
+		MessageBoxA(0, _Buffer, "Error", MB_OK | MB_ICONERROR); \
+	}while(0)
+	
 #define XACheck(Expression, Message) \
 	do \
 	{ \
 		if(FAILED(Expression)) \
 		{ \
-			char Buffer[256]; \
-			snprintf(Buffer, sizeof(Buffer), "%s\nHRESULT: 0x%08X", Message, Result); \
-			MessageBoxA(WindowHandle, Buffer, "XAudio2 Error", MB_OK | MB_ICONERROR); \
+			char _Buffer[256]; \
+			snprintf(_Buffer, sizeof(_Buffer), "%s\nHRESULT: 0x%08X", Message, Expression); \
+			MessageBoxA(WindowHandle, _Buffer, "XAudio2 Error", MB_OK | MB_ICONERROR); \
 			return -1;\
 		}\
 	}while(0) \
@@ -139,11 +148,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	WindowClass.hbrBackground = (HBRUSH)(COLOR_WINDOW+1);
 	
 	ATOM ClassID = RegisterClass(&WindowClass);
-	Check(ClassID);
+	if(ClassID == 0){Dialog("Could not register class\nReturn %hu", ClassID); return -1;}
 	
 	HWND WindowHandle = CreateWindowEx(0, WindowClass.lpszClassName, "Win32", WS_OVERLAPPEDWINDOW, 
 									   CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, NULL, NULL, hInstance, NULL);
-	Check(WindowHandle);
+	if(WindowHandle == 0){Dialog("Could not create the window \nReturn %p", WindowHandle); return -1;}
 	
 	//Step 2 BitBlt/StretchDIBits preamble
 	HDC ScreenDC = GetDC(WindowHandle);
@@ -212,15 +221,116 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	}
 	
 	//Relate data to the SourceBuffer and start playing
-	XAUDIO2_BUFFER Buffer = {};
-	Buffer.AudioBytes = Samples * sizeof(int16_t) * 2;
-	Buffer.pAudioData = (BYTE*)Data;
-	Buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
-	Buffer.LoopBegin = 0;
-	Buffer.LoopLength = Samples;
+	XAUDIO2_BUFFER AudioBuffer = {};
+	AudioBuffer.AudioBytes = Samples * sizeof(int16_t) * 2;
+	AudioBuffer.pAudioData = (BYTE*)Data;
+	AudioBuffer.LoopCount = XAUDIO2_LOOP_INFINITE;
+	AudioBuffer.LoopBegin = 0;
+	AudioBuffer.LoopLength = Samples;
 	
-	SourceVoice->SubmitSourceBuffer(&Buffer);
+	SourceVoice->SubmitSourceBuffer(&AudioBuffer);
+#if 0
 	SourceVoice->Start();
+#endif
+	
+	//Write Test
+	const LPCWSTR Path = L"test.txt";
+	HANDLE FileWrite = CreateFileW(Path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+	if(FileWrite == INVALID_HANDLE_VALUE)
+	{
+		DWORD Error = GetLastError(); 
+		Dialog("CreateFileW Write failed\nError %d", Error); 
+		return -1;
+	}
+	
+	//Write could be partial, but in almost all cases it won't be, no need for loop
+	const char* Message = "hello!";
+	DWORD WriteSize = (DWORD)strlen(Message);
+	DWORD Written;
+	BOOL Success = WriteFile(FileWrite, Message, WriteSize, &Written, 0);
+	if(!Success || Written != WriteSize)
+	{
+		DWORD Error = GetLastError(); 
+		Dialog("WriteFile failed\nError %d", Error);
+	}
+	else 
+	{
+		FlushFileBuffers(FileWrite); 
+		SetEndOfFile(FileWrite); // If we didn't use CREATE_ALWAYS this would be necessary, and SetFilePointer 
+	}
+	CloseHandle(FileWrite);
+
+	
+	//Read Test
+	HANDLE FileRead = CreateFileW(Path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
+	if(FileRead == INVALID_HANDLE_VALUE)
+	{
+		DWORD Error = GetLastError(); 
+		Dialog("CreateFileW Read failed\nError %d", Error); 
+		return -1;
+	}
+
+	LARGE_INTEGER LargeInteger;
+	Success = GetFileSizeEx(FileRead, &LargeInteger);
+	LONGLONG FileSize = LargeInteger.QuadPart;
+	if(!Success)
+	{
+		DWORD Error = GetLastError(); 
+		Dialog("GetFileSizeEx failed\nError %d", Error); 
+		CloseHandle(FileRead); 
+		return -1;
+	}
+
+	//Mainly for 32bit system guard if we want to read the full file into memory at once
+	if(FileSize >= SIZE_MAX)
+	{
+		Dialog("File too large to read into memory");
+		CloseHandle(FileRead);
+		return -1;
+	}
+	
+	char* Buffer = (char*)malloc((size_t)FileSize + 1); //+ 1 for null terminator
+	if (!Buffer)
+	{
+		Dialog("Malloc failed");
+		CloseHandle(FileRead);
+		return -1;
+	}
+	
+	LONGLONG TotalRead = 0;
+	LONGLONG Remaining = FileSize;
+	while(Remaining > 0)
+	{
+		DWORD BytesRead = 0;
+		DWORD BytesRequested = (Remaining >= MAXDWORD) ? MAXDWORD : (DWORD)Remaining;
+		Success = ReadFile(FileRead, Buffer + TotalRead, BytesRequested, &BytesRead, 0);
+		if(!Success)
+		{
+			DWORD Error = GetLastError();
+			Dialog("ReadFile failed\nError: %d", Error);
+			break;
+		}
+		if(BytesRead == 0)
+		{
+			Dialog("ReadFile didn't read any bytes");
+			break;
+		}
+		TotalRead += BytesRead;
+		Remaining -= BytesRead;
+	}
+	
+	//For Robustness
+	if(TotalRead != FileSize)
+	{
+		Dialog("Read incomplete: %llu bytes of %llu bytes", TotalRead, FileSize);
+		free(Buffer);
+		CloseHandle(FileRead);
+		return -1;
+	}
+	
+	Buffer[TotalRead] = '\0';
+	free(Buffer);
+	CloseHandle(FileRead);
 	
 	//Make the window visible and force a repaint
 	ShowWindow(WindowHandle, nCmdShow);
