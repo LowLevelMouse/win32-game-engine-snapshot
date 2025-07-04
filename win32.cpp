@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <xaudio2.h>
 #include <math.h>
+#include <emmintrin.h>
 
 //do while is to make this works with edge cases like within and if before an else
 //where it binds the macros if to the else instead of the initial if you wanted
@@ -85,6 +86,27 @@ LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM L
 				PAINTSTRUCT Paint;
 				HDC Hdc = BeginPaint(WindowHandle, &Paint);
 				
+				//BI_RGB + 32bpp Memory layout wants BGRA so register wants ARGB
+				#if 1
+				uint32_t Colour = 0xFFFF0000;
+				uint32_t* Pixels = (uint32_t*)BitmapMemory;
+				__m128i FillColour = _mm_set1_epi32(Colour);
+				
+				for(int Y = 0; Y < Height; Y++)
+				{
+					int X = 0;
+					for(; X <= Width - 4; X += 4)
+					{
+						_mm_storeu_si128((__m128i*)(Pixels + (Y * Width + X)), FillColour);
+					}
+					
+					for(; X < Width; X++)
+					{
+						Pixels[Y * Width + X] = Colour;
+					}
+				}
+				
+				#else
 				uint32_t* Pixels = (uint32_t*)BitmapMemory;
 				for(int Y = 0; Y < Height; Y++)
 				{
@@ -96,6 +118,7 @@ LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM L
 						Pixels[Y * Width + X] = (R << 16) | (G << 8) | B;
 					}
 				}
+				#endif
 				
 #if USE_STRETCHDIBITS
 				RECT ClientRect;
