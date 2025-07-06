@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdlib.h> //Contains exit macros
 #include <xaudio2.h>
 #include <math.h>
 #include <emmintrin.h>
@@ -19,7 +20,7 @@
 		MessageBoxA(0, _Buffer, "Error", MB_OK | MB_ICONERROR); \
 	}while(0)
 	
-#define XACheck(Expression, Message) \
+#define XACheck(Expression, Message, ReturnCode) \
 	do \
 	{ \
 		if(FAILED(Expression)) \
@@ -27,18 +28,145 @@
 			char _Buffer[256]; \
 			snprintf(_Buffer, sizeof(_Buffer), "%s\nHRESULT: 0x%08X", Message, Expression); \
 			MessageBoxA(WindowHandle, _Buffer, "XAudio2 Error", MB_OK | MB_ICONERROR); \
-			return -1;\
+			return ReturnCode; \
 		}\
 	}while(0) \
 	
 #define Pi32 3.1415927f
 
-static void* BitmapMemory;
-static HBITMAP BitmapHandle;
-static HDC BitmapDC;
-static BITMAPINFO BitmapInfo;
-static int Width = 640;
-static int Height = 480;
+#define Kilobytes(Value) ((Value) * 1024ULL)
+#define Megabytes(Value) ((Value) * 1024ULL * 1024ULL)
+#define Gigabytes(Value) ((Value) * 1024ULL * 1024ULL * 1024ULL)
+#define Terabytes(Value) ((Value) * 1024ULL * 1024ULL * 1024ULL * 1024ULL)
+
+
+
+#define PushStruct(Arena, type) (type*)PushSize(Arena, sizeof(type))
+#define PushArray(Arena, type, Count) (type*)PushSize(Arena, sizeof(type)*(Count))
+
+#define PushStruct16(Arena, type) (type*)PushSizeAligned(Arena, sizeof(type), 16)
+#define PushArray16(Arena, type, Count) (type*)PushSizeAligned(Arena, sizeof(type)*(Count), 16)
+
+#define AlignPow2(Value, Alignment) ( ( (Value) + ((Alignment) - 1) ) & ~((Alignment) - 1) ) 
+
+struct memory_arena
+{
+	size_t Size;
+	size_t Used;
+	uint8_t* Base;
+};
+
+void InitalizeArena(memory_arena* Arena, size_t Size)
+{
+	Arena->Base = (uint8_t*)VirtualAlloc(0, Size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	Arena->Size = Size;
+	Arena->Used = 0;
+}
+
+void* PushSize(memory_arena* Arena, size_t Size)
+{
+	Assert(Arena->Used + Size <= Arena->Size);
+	
+	void* Result = Arena->Base + Arena->Used;
+	Arena->Used += Size;
+	
+	return Result;
+}
+
+void* PushSizeAligned(memory_arena* Arena, size_t Size, size_t Alignment)
+{
+	Assert(Alignment != 0);
+	Assert( (Alignment & (Alignment - 1)) == 0);
+	uintptr_t PointerValue = (uintptr_t)(Arena->Base + Arena->Used);
+	uintptr_t AlignedPointerValue = AlignPow2(PointerValue, Alignment);
+	size_t AlignedUsed = AlignedPointerValue - (uintptr_t)Arena->Base;
+	
+	Assert(AlignedUsed + Size <= Arena->Size);
+	
+	void* Result = (void*)AlignedPointerValue;
+	Arena->Used += AlignedUsed + Size;
+	
+	return Result;
+}
+	
+
+struct backbuffer
+{
+	void* BitmapMemory;
+	HBITMAP BitmapHandle;
+	HDC BitmapDC;
+	BITMAPINFO BitmapInfo;
+	int Width;
+	int Height;
+	int Pitch;
+};
+
+struct xaudio2
+{
+	IXAudio2* Engine;
+	IXAudio2MasteringVoice* MasterVoice;
+};
+
+struct xaudio2_buffer
+{
+	IXAudio2SourceVoice* SourceVoice;
+	WAVEFORMATEX Format;
+	
+	int Seconds;
+	int SampleCount;
+	void* Samples;
+	float Frequency;
+	float Volume;
+	float Theta;
+	float DeltaTheta;
+};
+
+static backbuffer Backbuffer = {}; //Init to 0 since its a global anyway but just for clarity
+
+int RecreateBackbuffer(int NewWidth, int NewHeight)
+{
+	//Trying to stop WM_PAINT ASAP
+	Backbuffer.BitmapMemory = 0;
+	
+	if(Backbuffer.BitmapHandle)
+	{
+		DeleteObject(Backbuffer.BitmapHandle);
+		Backbuffer.BitmapHandle = 0;
+	}
+	
+	Backbuffer.Width = NewWidth;
+	Backbuffer.Height = NewHeight;
+	Backbuffer.Pitch = Backbuffer.Width * (Backbuffer.BitmapInfo.bmiHeader.biBitCount / 8);
+	Backbuffer.BitmapInfo.bmiHeader.biWidth = Backbuffer.Width;
+	Backbuffer.BitmapInfo.bmiHeader.biHeight = -Backbuffer.Height;
+	
+	Backbuffer.BitmapHandle = CreateDIBSection(Backbuffer.BitmapDC, &Backbuffer.BitmapInfo, DIB_RGB_COLORS, &Backbuffer.BitmapMemory, 0, 0);
+	if(!Backbuffer.BitmapMemory || !Backbuffer.BitmapHandle)
+	{
+		Backbuffer.BitmapMemory = 0;
+		Dialog("Could not CreateDIBSection for backbuffer");
+		if(Backbuffer.BitmapHandle)
+		{
+			DeleteObject(Backbuffer.BitmapHandle);
+			Backbuffer.BitmapHandle = 0;
+		}
+		return 0;
+	}
+	Assert(Backbuffer.BitmapMemory);
+	
+	HGDIOBJ Result = SelectObject(Backbuffer.BitmapDC, Backbuffer.BitmapHandle);
+	if(!Result || Result == HGDI_ERROR)
+	{
+		DeleteObject(Backbuffer.BitmapHandle);
+		Backbuffer.BitmapMemory = 0;
+		Backbuffer.BitmapHandle = 0;
+		return 0;
+	}
+	
+	return 1;
+				
+}
+
 
 LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM LParam)
 {
@@ -53,25 +181,17 @@ LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM L
 			int NewWidth = Rect.right - Rect.left;
 			int NewHeight = Rect.bottom - Rect.top;
 			
-			if(NewWidth > 0 && NewHeight > 0)
+			if((NewWidth > 0 && NewHeight > 0) || !Backbuffer.BitmapHandle)
 			{
-				Width = NewWidth;
-				Height = NewHeight;
-				
-				if(BitmapHandle)
+				int BackbufferResult = RecreateBackbuffer(NewWidth, NewHeight);
+				if(!BackbufferResult)
 				{
-					DeleteObject(BitmapHandle);
-					BitmapInfo.bmiHeader.biWidth = Width;
-					BitmapInfo.bmiHeader.biHeight = -Height;
-					BitmapHandle = 0;
-					BitmapMemory = 0;
-					
-					BitmapHandle = CreateDIBSection(BitmapDC, &BitmapInfo, DIB_RGB_COLORS, &BitmapMemory, 0, 0);
-					Assert(BitmapMemory);
-					SelectObject(BitmapDC, BitmapHandle);
+					Dialog("WM_SIZE RecreateBackbuffer failed");
 				}
-				
-				InvalidateRect(WindowHandle, NULL, FALSE);
+				else
+				{
+					InvalidateRect(WindowHandle, NULL, FALSE);
+				}
 			}
 #else
 			InvalidateRect(WindowHandle, NULL, FALSE);
@@ -81,44 +201,70 @@ LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM L
 		break;
 		case WM_PAINT:
 		{
-			if(BitmapMemory)
+			if(Backbuffer.BitmapMemory)
 			{
 				PAINTSTRUCT Paint;
 				HDC Hdc = BeginPaint(WindowHandle, &Paint);
 				
 				//BI_RGB + 32bpp Memory layout wants BGRA so register wants ARGB
-				#if 1
+
+#if 0
 				uint32_t Colour = 0xFFFF0000;
-				uint32_t* Pixels = (uint32_t*)BitmapMemory;
 				__m128i FillColour = _mm_set1_epi32(Colour);
+#endif
+
+#if 1
+				uint8_t* Pixels = (uint8_t*)(Backbuffer.BitmapMemory);
+
 				
-				for(int Y = 0; Y < Height; Y++)
+				for(int Y = 0; Y < Backbuffer.Height; Y++)
 				{
+					uint32_t* Row = (uint32_t*)Pixels;
 					int X = 0;
-					for(; X <= Width - 4; X += 4)
+					
+					uint8_t R = (uint8_t)(X % 256);
+					uint8_t G = (uint8_t)(Y % 256);
+					uint8_t B = 0;
+					uint32_t Colour = (0xFF << 24) | (R << 16) | (G << 8) | B;
+					
+					for(; X <= Backbuffer.Width - 4; X += 4)
 					{
-						_mm_storeu_si128((__m128i*)(Pixels + (Y * Width + X)), FillColour);
+						uint32_t Colour1 = (0xFF << 24) | (R << 16) | (G << 8) | B;
+						R = (uint8_t)((X + 1) % 256);
+						uint32_t Colour2 = (0xFF << 24) | (R << 16) | (G << 8) | B;
+						R = (uint8_t)((X + 2) % 256);
+						uint32_t Colour3 = (0xFF << 24) | (R << 16) | (G << 8) | B;
+						R = (uint8_t)((X + 3) % 256);
+						uint32_t Colour4 = (0xFF << 24) | (R << 16) | (G << 8) | B;
+						__m128i FillColour = _mm_set_epi32(Colour4, Colour3, Colour2, Colour1);
+						_mm_storeu_si128((__m128i*)(Row + X), FillColour);
 					}
 					
-					for(; X < Width; X++)
+					for(; X < Backbuffer.Width; X++)
 					{
-						Pixels[Y * Width + X] = Colour;
+						R = (uint8_t)(X % 256);
+						G = (uint8_t)(Y % 256);
+						B = 0;
+						Colour = (0xFF << 24) | (R << 16) | (G << 8) | B;
+						
+						Row[X] = Colour;
 					}
+					
+					Pixels += Backbuffer.Pitch;
 				}
-				
-				#else
-				uint32_t* Pixels = (uint32_t*)BitmapMemory;
-				for(int Y = 0; Y < Height; Y++)
+#else
+				uint32_t* Pixels = (uint32_t*)Backbuffer.BitmapMemory;
+				for(int Y = 0; Y < Backbuffer.Height; Y++)
 				{
-					for(int X = 0; X < Width; X++)
+					for(int X = 0; X < Backbuffer.Width; X++)
 					{
 						uint8_t R = (uint8_t)(X % 256);
 						uint8_t G = (uint8_t)(Y % 256);
 						uint8_t B = 0;
-						Pixels[Y * Width + X] = (R << 16) | (G << 8) | B;
+						Pixels[Y * Backbuffer.Width + X] = (R << 16) | (G << 8) | B;
 					}
 				}
-				#endif
+#endif
 				
 #if USE_STRETCHDIBITS
 				RECT ClientRect;
@@ -127,13 +273,14 @@ LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM L
 				int WindowHeight = ClientRect.bottom - ClientRect.top;
 				
 				StretchDIBits(Hdc, 0, 0, WindowWidth, WindowHeight,
-								   0, 0, Width, Height,
-								   BitmapMemory, &BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
+								   0, 0, Backbuffer.Width, Backbuffer.Height,
+								   Backbuffer.BitmapMemory, &Backbuffer.BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
 #else
-				BitBlt(Hdc, 0, 0, Width, Height, BitmapDC, 0, 0, SRCCOPY);
+				BitBlt(Hdc, 0, 0, Backbuffer.Width, Backbuffer.Height, Backbuffer.BitmapDC, 0, 0, SRCCOPY);
 #endif
 				
 				EndPaint(WindowHandle, &Paint);
+
 				
 			}
 			Result = 0;
@@ -141,8 +288,8 @@ LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM L
 		break;
 		case WM_DESTROY:
 		{
-			if(BitmapHandle) { DeleteObject(BitmapHandle); BitmapHandle = 0; }
-			if(BitmapDC) 	 { DeleteDC(BitmapDC); BitmapDC = 0; }
+			if(Backbuffer.BitmapHandle) { DeleteObject(Backbuffer.BitmapHandle); Backbuffer.BitmapHandle = 0; }
+			if(Backbuffer.BitmapDC) 	 { DeleteDC(Backbuffer.BitmapDC); Backbuffer.BitmapDC = 0; }
 			PostQuitMessage(0);
 			Result = 0;
 		}
@@ -155,119 +302,171 @@ LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM L
 	return Result;
 	
 }
-
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
-{
-	(void)hPrevInstance;
-	(void)lpCmdLine;
-	(void)nCmdShow;
 	
-	//Step 1 Window Initialization
+HWND WindowInitialization(HINSTANCE hInstance)
+{
 	WNDCLASS WindowClass = {};
 	WindowClass.lpfnWndProc = WindowProc;
 	WindowClass.hInstance = hInstance;
 	WindowClass.lpszClassName = "MyWindowClass";
 	WindowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
-	WindowClass.hbrBackground = (HBRUSH)(COLOR_WINDOW+1);
+	//WindowClass.hbrBackground = (HBRUSH)(COLOR_WINDOW+1); If we weren't handling WM_PAINT
 	
 	ATOM ClassID = RegisterClass(&WindowClass);
-	if(ClassID == 0){Dialog("Could not register class\nReturn %hu", ClassID); return -1;}
+	if(ClassID == 0)
+	{
+		Dialog("Could not register class\nReturn %hu", ClassID); 
+		return 0;
+	}
 	
 	HWND WindowHandle = CreateWindowEx(0, WindowClass.lpszClassName, "Win32", WS_OVERLAPPEDWINDOW, 
 									   CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, NULL, NULL, hInstance, NULL);
-	if(WindowHandle == 0){Dialog("Could not create the window \nReturn %p", WindowHandle); return -1;}
+	if(WindowHandle == 0)
+	{
+		Dialog("Could not create the window \nReturn %p", WindowHandle); 
+		return 0;
+	}
 	
-	//Step 2 BitBlt/StretchDIBits preamble
+	
+	return WindowHandle;
+}
+
+int BackbufferInitialization(HWND WindowHandle)
+{
+	Backbuffer.Width = 647;
+	Backbuffer.Height = 480;
+	
+	Backbuffer.BitmapInfo.bmiHeader.biSize = sizeof(Backbuffer.BitmapInfo.bmiHeader);
+	Backbuffer.BitmapInfo.bmiHeader.biWidth = Backbuffer.Width;
+	Backbuffer.BitmapInfo.bmiHeader.biHeight = -Backbuffer.Height;
+	Backbuffer.BitmapInfo.bmiHeader.biPlanes = 1;
+	Backbuffer.BitmapInfo.bmiHeader.biBitCount = 32;
+	Backbuffer.BitmapInfo.bmiHeader.biCompression = BI_RGB;
+	
+	Backbuffer.Pitch = Backbuffer.Width * (Backbuffer.BitmapInfo.bmiHeader.biBitCount / 8);
+	//Assert((Backbuffer.Pitch & 16) == 0);
+	
+#ifndef USE_STRETCHDIBITS
+	
 	HDC ScreenDC = GetDC(WindowHandle);
-	BitmapDC = CreateCompatibleDC(ScreenDC);
+	Backbuffer.BitmapDC = CreateCompatibleDC(ScreenDC);
+	if(!Backbuffer.BitmapDC)
+	{
+		Dialog("Could not CreateCompatibleDC for backbuffer");
+		ReleaseDC(WindowHandle, ScreenDC);
+		return 0;
+	}
 	
-	BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
-	BitmapInfo.bmiHeader.biWidth = Width;
-	BitmapInfo.bmiHeader.biHeight = -Height;
-	BitmapInfo.bmiHeader.biPlanes = 1;
-	BitmapInfo.bmiHeader.biBitCount = 32;
-	BitmapInfo.bmiHeader.biCompression = BI_RGB;
+	Backbuffer.BitmapHandle = CreateDIBSection(Backbuffer.BitmapDC, &Backbuffer.BitmapInfo, DIB_RGB_COLORS, &Backbuffer.BitmapMemory, 0, 0);
+	if(!Backbuffer.BitmapMemory || !Backbuffer.BitmapHandle)
+	{
+		Dialog("Could not CreateDIBSection for backbuffer");
+		if(Backbuffer.BitmapHandle)
+		{
+			DeleteObject(Backbuffer.BitmapHandle);
+		}
+		DeleteDC(Backbuffer.BitmapDC);
+		ReleaseDC(WindowHandle, ScreenDC);
+		return 0;
+	}
+	Assert(Backbuffer.BitmapMemory);
 	
-	
-	BitmapHandle = CreateDIBSection(BitmapDC, &BitmapInfo, DIB_RGB_COLORS, &BitmapMemory, 0, 0);
-	Assert(BitmapMemory);
-	SelectObject(BitmapDC, BitmapHandle);
+	HGDIOBJ Result = SelectObject(Backbuffer.BitmapDC, Backbuffer.BitmapHandle); //Not working with a region so no HGDI_ERROR check
+	if(!Result)
+	{
+		Dialog("Could not SelectObject for the backbuffer");
+		DeleteObject(Backbuffer.BitmapHandle);
+		DeleteDC(Backbuffer.BitmapDC);
+		ReleaseDC(WindowHandle, ScreenDC);
+		return 0;
+	}
 	
 	ReleaseDC(WindowHandle, ScreenDC);
+#else
+	(void)WindowHandle;
+
+	int Size = Backbuffer.Height * Backbuffer.Pitch;
+	Backbuffer.BitmapMemory = (uint8_t*)VirtualAlloc(0, Size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	Assert(((uintptr_t)Backbuffer.BitmapMemory % 16) == 0 );
+	Assert(Backbuffer.BitmapMemory);
+#endif
 	
-	//Step 3 Initalize XAudio2
+	return 1;
+}
+
+IXAudio2* InitalizeXAudio2(HWND WindowHandle)
+{
 	CoInitializeEx(0, COINIT_MULTITHREADED); //Need to init COM
 	
 	IXAudio2* XAudio;
 	HRESULT Result = XAudio2Create(&XAudio, 0, XAUDIO2_DEFAULT_PROCESSOR);
-	XACheck(Result, "XAudio2Create Failed with %s");
+	XACheck(Result, "XAudio2Create Failed with %s", 0);
+
 	
 	IXAudio2MasteringVoice* MasterVoice;
 	Result = XAudio->CreateMasteringVoice(&MasterVoice);
-	XACheck(Result, "CreateMasteringVoice Failed with %s");
+	XACheck(Result, "CreateMasteringVoice Failed with %s", 0);
+
+	return XAudio;
+}
+
+int CreateXAudio2Buffer(HWND WindowHandle, IXAudio2* XAudio2, xaudio2_buffer* XAudio2Buffer)
+{
+	XAudio2Buffer->Format.wFormatTag = WAVE_FORMAT_PCM;
+	XAudio2Buffer->Format.nChannels = 2;
+	XAudio2Buffer->Format.nSamplesPerSec = 48000;
+	XAudio2Buffer->Format.wBitsPerSample = 16;
+	XAudio2Buffer->Format.nBlockAlign = (XAudio2Buffer->Format.nChannels * XAudio2Buffer->Format.wBitsPerSample) / 8;
+	XAudio2Buffer->Format.nAvgBytesPerSec = XAudio2Buffer->Format.nSamplesPerSec * XAudio2Buffer->Format.nBlockAlign;
 	
+	HRESULT Result = XAudio2->CreateSourceVoice(&XAudio2Buffer->SourceVoice, &XAudio2Buffer->Format);
+	XACheck(Result, "CreateSourceVoice Failed with %s", 0);
 	
-	WAVEFORMATEX Format = {};
-	Format.wFormatTag = WAVE_FORMAT_PCM;
-	Format.nChannels = 2;
-	Format.nSamplesPerSec = 48000;
-	Format.wBitsPerSample = 16;
-	Format.nBlockAlign = (Format.nChannels * Format.wBitsPerSample) / 8;
-	Format.nAvgBytesPerSec = Format.nSamplesPerSec * Format.nBlockAlign;
-	
-	IXAudio2SourceVoice* SourceVoice;
-	Result = XAudio->CreateSourceVoice(&SourceVoice, &Format);
-	XACheck(Result, "CreateSourceVoice Failed with %s");
-	
-	//Fill a buffer of sound
-	const int Samples = 48000;
-	int16_t Data[Samples * 2];
-	float Frequency = 320.0f;
-	float Volume = 2500;
-	float Theta = 0;
-	float DeltaTheta = (2.0f * Pi32 * Frequency) / Format.nSamplesPerSec;
-	
-	int16_t* SampleDest = (int16_t*)Data;
-	for(int i = 0; i < Samples; i++)
+	return 1;
+}
+
+int FillXAudio2Buffer(xaudio2_buffer* XAudio2Buffer)
+{	
+	int16_t* SampleDest = (int16_t*)XAudio2Buffer->Samples;
+	for(int i = 0; i < XAudio2Buffer->SampleCount; i++)
 	{
-		float Sine = sinf(Theta);
-		int16_t Sample = (int16_t)(Sine * Volume);
+		float Sine = sinf(XAudio2Buffer->Theta);
+		int16_t Sample = (int16_t)(Sine * XAudio2Buffer->Volume);
 		*SampleDest++ = Sample;
 		*SampleDest++ = Sample;
 		
-		Theta += DeltaTheta;
+		XAudio2Buffer->Theta += XAudio2Buffer->DeltaTheta;
 		
-		if(Theta >= 2.0f * Pi32)
+		if(XAudio2Buffer->Theta >= 2.0f * Pi32)
 		{
-			Theta -= 2.0f * Pi32;
+			XAudio2Buffer->Theta -= 2.0f * Pi32;
 		}
 	}
 	
 	//Relate data to the SourceBuffer and start playing
 	XAUDIO2_BUFFER AudioBuffer = {};
-	AudioBuffer.AudioBytes = Samples * sizeof(int16_t) * 2;
-	AudioBuffer.pAudioData = (BYTE*)Data;
+	AudioBuffer.AudioBytes = XAudio2Buffer->SampleCount * sizeof(int16_t) * 2;
+	AudioBuffer.pAudioData = (BYTE*)XAudio2Buffer->Samples;
 	AudioBuffer.LoopCount = XAUDIO2_LOOP_INFINITE;
 	AudioBuffer.LoopBegin = 0;
-	AudioBuffer.LoopLength = Samples;
+	AudioBuffer.LoopLength = XAudio2Buffer->SampleCount;
 	
-	SourceVoice->SubmitSourceBuffer(&AudioBuffer);
-#if 0
-	SourceVoice->Start();
-#endif
+	XAudio2Buffer->SourceVoice->SubmitSourceBuffer(&AudioBuffer);
 	
-	//Write Test
-	const LPCWSTR Path = L"test.txt";
+	return 1;
+}
+
+int Win32WriteFile(const LPCWSTR Path, const char* Message)
+{
 	HANDLE FileWrite = CreateFileW(Path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	if(FileWrite == INVALID_HANDLE_VALUE)
 	{
 		DWORD Error = GetLastError(); 
 		Dialog("CreateFileW Write failed\nError %d", Error); 
-		return -1;
+		return 0;
 	}
 	
 	//Write could be partial, but in almost all cases it won't be, no need for loop
-	const char* Message = "hello!";
 	DWORD WriteSize = (DWORD)strlen(Message);
 	DWORD Written;
 	BOOL Success = WriteFile(FileWrite, Message, WriteSize, &Written, 0);
@@ -279,29 +478,33 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	else 
 	{
 		FlushFileBuffers(FileWrite); 
-		SetEndOfFile(FileWrite); // If we didn't use CREATE_ALWAYS this would be necessary, and SetFilePointer 
+		//SetEndOfFile(FileWrite); // If we didn't use CREATE_ALWAYS this would be necessary, and SetFilePointer 
 	}
 	CloseHandle(FileWrite);
-
 	
+	return 1;
+}
+
+int Win32ReadFile(const LPCWSTR Path)
+{
 	//Read Test
 	HANDLE FileRead = CreateFileW(Path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
 	if(FileRead == INVALID_HANDLE_VALUE)
 	{
 		DWORD Error = GetLastError(); 
 		Dialog("CreateFileW Read failed\nError %d", Error); 
-		return -1;
+		return 0;
 	}
 
 	LARGE_INTEGER LargeInteger;
-	Success = GetFileSizeEx(FileRead, &LargeInteger);
+	BOOL Success = GetFileSizeEx(FileRead, &LargeInteger);
 	LONGLONG FileSize = LargeInteger.QuadPart;
 	if(!Success)
 	{
 		DWORD Error = GetLastError(); 
 		Dialog("GetFileSizeEx failed\nError %d", Error); 
 		CloseHandle(FileRead); 
-		return -1;
+		return 0;
 	}
 
 	//Mainly for 32bit system guard if we want to read the full file into memory at once
@@ -309,7 +512,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	{
 		Dialog("File too large to read into memory");
 		CloseHandle(FileRead);
-		return -1;
+		return 0;
 	}
 	
 	char* Buffer = (char*)malloc((size_t)FileSize + 1); //+ 1 for null terminator
@@ -317,7 +520,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	{
 		Dialog("Malloc failed");
 		CloseHandle(FileRead);
-		return -1;
+		return 0;
 	}
 	
 	LONGLONG TotalRead = 0;
@@ -348,12 +551,85 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		Dialog("Read incomplete: %llu bytes of %llu bytes", TotalRead, FileSize);
 		free(Buffer);
 		CloseHandle(FileRead);
-		return -1;
+		return 0;
 	}
 	
 	Buffer[TotalRead] = '\0';
 	free(Buffer);
 	CloseHandle(FileRead);
+	
+	return 1;
+	
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+{
+	(void)hPrevInstance;
+	(void)lpCmdLine;
+	(void)nCmdShow;
+	
+	memory_arena MemoryArena = {};
+	InitalizeArena(&MemoryArena, Megabytes(500));
+
+	//Step 1 Window Initialization
+	HWND WindowHandle = WindowInitialization(hInstance);
+	if(!WindowHandle)
+	{
+		return EXIT_FAILURE;
+	}
+	//Step 2 BitBlt/StretchDIBits preamble
+	int BackbufferResult = BackbufferInitialization(WindowHandle);
+	if(!BackbufferResult)
+	{
+		return EXIT_FAILURE;
+	}
+	
+	//Step 3 Initalize XAudio2 and fill a buffer
+	IXAudio2* XAudio2 = InitalizeXAudio2(WindowHandle);
+	if(!XAudio2)
+	{
+		return EXIT_FAILURE;
+	}
+	
+	xaudio2_buffer XAudio2Buffer = {};
+	
+	int XAudio2Result = CreateXAudio2Buffer(WindowHandle, XAudio2, &XAudio2Buffer);
+	if(!XAudio2Result)
+	{
+		return EXIT_FAILURE;
+	}
+	
+	XAudio2Buffer.Seconds = 1;
+	XAudio2Buffer.SampleCount = 48000;
+	XAudio2Buffer.Samples = PushSizeAligned(&MemoryArena, sizeof(int16_t) * 2 * XAudio2Buffer.SampleCount * XAudio2Buffer.Seconds, 16);
+	XAudio2Buffer.Frequency = 320.0f;
+	XAudio2Buffer.Volume = 2500;
+	XAudio2Buffer.Theta = 0;
+	XAudio2Buffer.DeltaTheta = (2.0f * Pi32 * XAudio2Buffer.Frequency) / XAudio2Buffer.Format.nSamplesPerSec;
+	
+	XAudio2Result = FillXAudio2Buffer(&XAudio2Buffer);
+	if(!XAudio2Result)
+	{
+		return EXIT_FAILURE;
+	}
+	
+#if 1
+	XAudio2Buffer.SourceVoice->Start();
+#endif
+
+	//Step 4 Write and Read File I/O
+	const char* Message = "hello!";
+	const LPCWSTR Path = L"test.txt";
+	int WriteResult =  Win32WriteFile(Path, Message);
+	if(!WriteResult)
+	{
+		return EXIT_FAILURE;
+	}
+	int ReadResult = Win32ReadFile(Path);
+	if(!ReadResult)
+	{
+		return EXIT_FAILURE;
+	}
 	
 	//Make the window visible and force a repaint
 	ShowWindow(WindowHandle, nCmdShow);
@@ -375,10 +651,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	}
 	
 	//Cleanup
-	XAudio->Release();
+	XAudio2->Release();
 	CoUninitialize();
-	if(BitmapHandle) { DeleteObject(BitmapHandle); BitmapHandle = 0; }
-	if(BitmapDC) 	 { DeleteDC(BitmapDC); BitmapDC = 0; }
+	if(Backbuffer.BitmapHandle) 
+	{ 
+		DeleteObject(Backbuffer.BitmapHandle); 
+		Backbuffer.BitmapHandle = 0; 
+	}
+	if(Backbuffer.BitmapDC)
+	{ 
+		DeleteDC(Backbuffer.BitmapDC); 
+		Backbuffer.BitmapDC = 0; 
+	}
 	return (int)Msg.wParam;
 		
 }
