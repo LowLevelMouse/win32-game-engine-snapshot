@@ -17,7 +17,7 @@ Run the `build.bat` file in the project root, then execute `win32.exe`.
 - Custom memory allocator using an arena built on top of `VirtualAlloc`
   - Supports memory alignment to an arbitrary byte boundary
 - Plays a sine wave using XAudio2  
-  **Note**: This is muted by default. `SourceVoice->Start();` is `#if`-guarded — remove the guard to enable audio.
+  **Note**: Audio is muted by default. To enable it, remove the `#if` guard on `SourceVoice->Start();` or add `/DAUDIO_PLAYING` to the build batch file.
 - File I/O system  
   - Currently writes `"hello!"` to a test file as a demonstration
 - Initializes OpenGL on Windows and renders a brick texture with transparency  
