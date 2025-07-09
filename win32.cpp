@@ -7,6 +7,19 @@
 #include <math.h>
 #include <emmintrin.h>
 
+#include <glad/wgl.h>
+#include <glad/gl.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+extern "C" {
+    // NVIDIA
+    __declspec(dllexport) DWORD NvOptimusEnablement = 1;
+    // AMD
+    __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
+
 //do while is to make this works with edge cases like within and if before an else
 //where it binds the macros if to the else instead of the initial if you wanted
 //turns multiple statements into one
@@ -48,6 +61,8 @@
 #define PushArray16(Arena, type, Count) (type*)PushSizeAligned(Arena, sizeof(type)*(Count), 16)
 
 #define AlignPow2(Value, Alignment) ( ( (Value) + ((Alignment) - 1) ) & ~((Alignment) - 1) ) 
+
+#define ARGB32(A, R, G, B) (uint32_t)( (A << 24) | (R << 16) | (G << 8) | B )
 
 struct memory_arena
 {
@@ -121,7 +136,9 @@ struct xaudio2_buffer
 	float DeltaTheta;
 };
 
+#if 0
 static backbuffer Backbuffer = {}; //Init to 0 since its a global anyway but just for clarity
+
 
 int RecreateBackbuffer(int NewWidth, int NewHeight)
 {
@@ -167,6 +184,144 @@ int RecreateBackbuffer(int NewWidth, int NewHeight)
 				
 }
 
+#endif
+
+int ClampInt0ToBound(int Value, int Bound)
+{
+	if(Value < 0)
+	{
+		Value = 0;
+	}
+	
+	if(Value > Bound)
+	{
+		Value = Bound;
+	}
+	
+	return Value;
+}
+
+#if 0
+
+void DrawRectangle(int XStart, int YStart, int Width, int Height, uint32_t Colour)
+{
+	XStart = ClampInt0ToBound(XStart, Backbuffer.Width - 1);
+	YStart = ClampInt0ToBound(YStart, Backbuffer.Height - 1);
+	
+	if(XStart + Width > Backbuffer.Width - 1)
+	{
+		Width -= (XStart + Width) - (Backbuffer.Width - 1);
+	}
+	if(YStart + Height > Backbuffer.Height - 1)
+	{
+		Height -= (YStart + Height) - (Backbuffer.Height - 1);
+	}
+	
+	uint8_t* Pixels = (uint8_t*)Backbuffer.BitmapMemory + (YStart * Backbuffer.Pitch);
+
+
+	for(int Y = 0; Y < Height; Y++)
+	{
+		uint32_t* Row = (uint32_t*)Pixels;
+		for(int X = 0; X < Width; X++)
+		{
+			Row[X + XStart] = Colour;
+		}
+		
+		Pixels += Backbuffer.Pitch;
+	}
+}
+
+
+void FillBackbuffer(uint32_t Colour)
+{
+#if 0
+	uint32_t Colour = 0xFFFF0000;
+	__m128i FillColour = _mm_set1_epi32(Colour);
+#endif
+
+#if 0
+	uint8_t* Pixels = (uint8_t*)(Backbuffer.BitmapMemory);
+
+	
+	for(int Y = 0; Y < Backbuffer.Height; Y++)
+	{
+		uint32_t* Row = (uint32_t*)Pixels;
+		int X = 0;
+		
+		uint8_t R = (uint8_t)(X % 256);
+		uint8_t G = (uint8_t)(Y % 256);
+		uint8_t B = 0;
+		uint32_t Colour = (0xFF << 24) | (R << 16) | (G << 8) | B;
+		
+		for(; X <= Backbuffer.Width - 4; X += 4)
+		{
+			uint32_t Colour1 = (0xFF << 24) | (R << 16) | (G << 8) | B;
+			R = (uint8_t)((X + 1) % 256);
+			uint32_t Colour2 = (0xFF << 24) | (R << 16) | (G << 8) | B;
+			R = (uint8_t)((X + 2) % 256);
+			uint32_t Colour3 = (0xFF << 24) | (R << 16) | (G << 8) | B;
+			R = (uint8_t)((X + 3) % 256);
+			uint32_t Colour4 = (0xFF << 24) | (R << 16) | (G << 8) | B;
+			__m128i FillColour = _mm_set_epi32(Colour4, Colour3, Colour2, Colour1);
+			_mm_storeu_si128((__m128i*)(Row + X), FillColour);
+		}
+		
+		for(; X < Backbuffer.Width; X++)
+		{
+			R = (uint8_t)(X % 256);
+			G = (uint8_t)(Y % 256);
+			B = 0;
+			Colour = (0xFF << 24) | (R << 16) | (G << 8) | B;
+			
+			Row[X] = Colour;
+		}
+		
+		Pixels += Backbuffer.Pitch;
+	}
+#else
+	uint8_t* Pixels = (uint8_t*)Backbuffer.BitmapMemory;
+
+	for(int Y = 0; Y < Backbuffer.Height; Y++)
+	{
+		uint32_t* Row = (uint32_t*)Pixels;
+		for(int X = 0; X < Backbuffer.Width; X++)
+		{
+			Row[X] = Colour;
+		}
+		
+		Pixels += Backbuffer.Pitch;
+	}
+#endif
+}
+
+
+void DisplayBackbuffer(HWND WindowHandle, HDC Hdc)
+{
+#if USE_STRETCHDIBITS
+	RECT ClientRect;
+	GetClientRect(WindowHandle, &ClientRect);
+	int WindowWidth = ClientRect.right - ClientRect.left;
+	int WindowHeight = ClientRect.bottom - ClientRect.top;
+	
+	int Result = StretchDIBits(Hdc, 0, 0, WindowWidth, WindowHeight,
+									0, 0, Backbuffer.Width, Backbuffer.Height,
+									Backbuffer.BitmapMemory, &Backbuffer.BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
+	if(Result == GDI_ERROR)
+	{
+		
+	}
+#else
+	BOOL Success = BitBlt(Hdc, 0, 0, Backbuffer.Width, Backbuffer.Height, Backbuffer.BitmapDC, 0, 0, SRCCOPY);
+	if(!Success)
+	{
+		
+	}
+#endif
+}
+
+#endif
+
 
 LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM LParam)
 {
@@ -175,121 +330,24 @@ LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM L
 	{
 		case WM_SIZE:
 		{
-#ifndef USE_STRETCHDIBITS
-			RECT Rect;
-			GetClientRect(WindowHandle, &Rect);
-			int NewWidth = Rect.right - Rect.left;
-			int NewHeight = Rect.bottom - Rect.top;
+			int Width = LOWORD(LParam);
+			int Height = HIWORD(LParam);
+			glViewport(0, 0, Width, Height);
 			
-			if((NewWidth > 0 && NewHeight > 0) || !Backbuffer.BitmapHandle)
-			{
-				int BackbufferResult = RecreateBackbuffer(NewWidth, NewHeight);
-				if(!BackbufferResult)
-				{
-					Dialog("WM_SIZE RecreateBackbuffer failed");
-				}
-				else
-				{
-					InvalidateRect(WindowHandle, NULL, FALSE);
-				}
-			}
-#else
-			InvalidateRect(WindowHandle, NULL, FALSE);
-#endif
 			Result = 0;
 		}
 		break;
 		case WM_PAINT:
 		{
-			if(Backbuffer.BitmapMemory)
-			{
-				PAINTSTRUCT Paint;
-				HDC Hdc = BeginPaint(WindowHandle, &Paint);
-				
-				//BI_RGB + 32bpp Memory layout wants BGRA so register wants ARGB
-
-#if 0
-				uint32_t Colour = 0xFFFF0000;
-				__m128i FillColour = _mm_set1_epi32(Colour);
-#endif
-
-#if 1
-				uint8_t* Pixels = (uint8_t*)(Backbuffer.BitmapMemory);
-
-				
-				for(int Y = 0; Y < Backbuffer.Height; Y++)
-				{
-					uint32_t* Row = (uint32_t*)Pixels;
-					int X = 0;
-					
-					uint8_t R = (uint8_t)(X % 256);
-					uint8_t G = (uint8_t)(Y % 256);
-					uint8_t B = 0;
-					uint32_t Colour = (0xFF << 24) | (R << 16) | (G << 8) | B;
-					
-					for(; X <= Backbuffer.Width - 4; X += 4)
-					{
-						uint32_t Colour1 = (0xFF << 24) | (R << 16) | (G << 8) | B;
-						R = (uint8_t)((X + 1) % 256);
-						uint32_t Colour2 = (0xFF << 24) | (R << 16) | (G << 8) | B;
-						R = (uint8_t)((X + 2) % 256);
-						uint32_t Colour3 = (0xFF << 24) | (R << 16) | (G << 8) | B;
-						R = (uint8_t)((X + 3) % 256);
-						uint32_t Colour4 = (0xFF << 24) | (R << 16) | (G << 8) | B;
-						__m128i FillColour = _mm_set_epi32(Colour4, Colour3, Colour2, Colour1);
-						_mm_storeu_si128((__m128i*)(Row + X), FillColour);
-					}
-					
-					for(; X < Backbuffer.Width; X++)
-					{
-						R = (uint8_t)(X % 256);
-						G = (uint8_t)(Y % 256);
-						B = 0;
-						Colour = (0xFF << 24) | (R << 16) | (G << 8) | B;
-						
-						Row[X] = Colour;
-					}
-					
-					Pixels += Backbuffer.Pitch;
-				}
-#else
-				uint32_t* Pixels = (uint32_t*)Backbuffer.BitmapMemory;
-				for(int Y = 0; Y < Backbuffer.Height; Y++)
-				{
-					for(int X = 0; X < Backbuffer.Width; X++)
-					{
-						uint8_t R = (uint8_t)(X % 256);
-						uint8_t G = (uint8_t)(Y % 256);
-						uint8_t B = 0;
-						Pixels[Y * Backbuffer.Width + X] = (R << 16) | (G << 8) | B;
-					}
-				}
-#endif
-				
-#if USE_STRETCHDIBITS
-				RECT ClientRect;
-				GetClientRect(WindowHandle, &ClientRect);
-				int WindowWidth = ClientRect.right - ClientRect.left;
-				int WindowHeight = ClientRect.bottom - ClientRect.top;
-				
-				StretchDIBits(Hdc, 0, 0, WindowWidth, WindowHeight,
-								   0, 0, Backbuffer.Width, Backbuffer.Height,
-								   Backbuffer.BitmapMemory, &Backbuffer.BitmapInfo, DIB_RGB_COLORS, SRCCOPY);
-#else
-				BitBlt(Hdc, 0, 0, Backbuffer.Width, Backbuffer.Height, Backbuffer.BitmapDC, 0, 0, SRCCOPY);
-#endif
-				
-				EndPaint(WindowHandle, &Paint);
-
-				
-			}
+			PAINTSTRUCT Ps;
+			BeginPaint(WindowHandle, &Ps);
+			EndPaint(WindowHandle, &Ps);
+			
 			Result = 0;
 		}
 		break;
 		case WM_DESTROY:
 		{
-			if(Backbuffer.BitmapHandle) { DeleteObject(Backbuffer.BitmapHandle); Backbuffer.BitmapHandle = 0; }
-			if(Backbuffer.BitmapDC) 	 { DeleteDC(Backbuffer.BitmapDC); Backbuffer.BitmapDC = 0; }
 			PostQuitMessage(0);
 			Result = 0;
 		}
@@ -331,67 +389,289 @@ HWND WindowInitialization(HINSTANCE hInstance)
 	return WindowHandle;
 }
 
-int BackbufferInitialization(HWND WindowHandle)
+HGLRC InitializeOpenGL(HDC WindowDC)
 {
-	Backbuffer.Width = 647;
-	Backbuffer.Height = 480;
+	PIXELFORMATDESCRIPTOR Pfd = {};
+	Pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
+	Pfd.nVersion = 1;
+	Pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+	Pfd.iPixelType = PFD_TYPE_RGBA;
+	Pfd.cColorBits = 24;
+	Pfd.cAlphaBits = 8;
+	//Pfd.cDepthBits = 24;
+	//Pfd.cStencilBits = 8;
+	Pfd.iLayerType = PFD_MAIN_PLANE;
 	
-	Backbuffer.BitmapInfo.bmiHeader.biSize = sizeof(Backbuffer.BitmapInfo.bmiHeader);
-	Backbuffer.BitmapInfo.bmiHeader.biWidth = Backbuffer.Width;
-	Backbuffer.BitmapInfo.bmiHeader.biHeight = -Backbuffer.Height;
-	Backbuffer.BitmapInfo.bmiHeader.biPlanes = 1;
-	Backbuffer.BitmapInfo.bmiHeader.biBitCount = 32;
-	Backbuffer.BitmapInfo.bmiHeader.biCompression = BI_RGB;
-	
-	Backbuffer.Pitch = Backbuffer.Width * (Backbuffer.BitmapInfo.bmiHeader.biBitCount / 8);
-	//Assert((Backbuffer.Pitch & 16) == 0);
-	
-#ifndef USE_STRETCHDIBITS
-	
-	HDC ScreenDC = GetDC(WindowHandle);
-	Backbuffer.BitmapDC = CreateCompatibleDC(ScreenDC);
-	if(!Backbuffer.BitmapDC)
+	int PixelFormat = ChoosePixelFormat(WindowDC, &Pfd);
+	if(!PixelFormat)
 	{
-		Dialog("Could not CreateCompatibleDC for backbuffer");
-		ReleaseDC(WindowHandle, ScreenDC);
+		Dialog("Could not get the pixel format\nError: %d", GetLastError());
+		return 0;
+	}
+	BOOL Success = SetPixelFormat(WindowDC, PixelFormat, &Pfd);
+	if(!Success)
+	{
+		Dialog("Could not set the pixel format\nError %d", GetLastError());
 		return 0;
 	}
 	
-	Backbuffer.BitmapHandle = CreateDIBSection(Backbuffer.BitmapDC, &Backbuffer.BitmapInfo, DIB_RGB_COLORS, &Backbuffer.BitmapMemory, 0, 0);
-	if(!Backbuffer.BitmapMemory || !Backbuffer.BitmapHandle)
+	HGLRC DummyGLRC;
+	DummyGLRC = wglCreateContext(WindowDC);
+	if(!DummyGLRC)
 	{
-		Dialog("Could not CreateDIBSection for backbuffer");
-		if(Backbuffer.BitmapHandle)
-		{
-			DeleteObject(Backbuffer.BitmapHandle);
-		}
-		DeleteDC(Backbuffer.BitmapDC);
-		ReleaseDC(WindowHandle, ScreenDC);
-		return 0;
-	}
-	Assert(Backbuffer.BitmapMemory);
-	
-	HGDIOBJ Result = SelectObject(Backbuffer.BitmapDC, Backbuffer.BitmapHandle); //Not working with a region so no HGDI_ERROR check
-	if(!Result)
-	{
-		Dialog("Could not SelectObject for the backbuffer");
-		DeleteObject(Backbuffer.BitmapHandle);
-		DeleteDC(Backbuffer.BitmapDC);
-		ReleaseDC(WindowHandle, ScreenDC);
+		Dialog("Could not create DummyGLRC\nError %d", GetLastError());
 		return 0;
 	}
 	
-	ReleaseDC(WindowHandle, ScreenDC);
-#else
-	(void)WindowHandle;
+	Success = wglMakeCurrent(WindowDC, DummyGLRC);
+	if(!Success)
+	{
+		Dialog("Could not make DummyGLRC current\nError %d", GetLastError());
+		wglDeleteContext(DummyGLRC);
+		return 0;
+	}
+	
+	int SuccessGlad = gladLoadWGL(WindowDC, (GLADloadfunc)wglGetProcAddress);
+	if(!SuccessGlad)
+	{
+		Dialog("Could complete gladLoadWGL\nError %d", SuccessGlad);
+		wglDeleteContext(DummyGLRC);
+		return 0;
+	}
+	
+	if(!wglCreateContextAttribsARB)
+	{
+		Dialog("Could not find wglCreateContextAttribsARB\nCan't proceed");
+		wglDeleteContext(DummyGLRC);
+		return 0;
+	}
+	
+	const int Attribs[] = {WGL_CONTEXT_MAJOR_VERSION_ARB, 3, 
+						   WGL_CONTEXT_MINOR_VERSION_ARB, 3, 
+						   WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+						   // WGL_CONTEXT_FLAGS_ARB, WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
+						   0};
+						   
+	HGLRC NewGLContext = wglCreateContextAttribsARB(WindowDC, 0 , Attribs);
+	if(!NewGLContext)
+	{
+		Dialog("Could not create the Core 3.3 OpenGL Context\nCan't proceed");
+		wglDeleteContext(DummyGLRC);
+		return 0;
+	}
+	
+	wglMakeCurrent(0, 0);
+	wglDeleteContext(DummyGLRC);
+	
+	Success = wglMakeCurrent(WindowDC, NewGLContext);
+	if(!Success)
+	{
+		Dialog("Could not bind the Core 3.3 OpenGL context\nError: %d", Success);
+		wglDeleteContext(NewGLContext);
+		return 0;
+	}
+	
+	SuccessGlad = gladLoaderLoadGL();
+	if(!SuccessGlad)
+	{
+		Dialog("Could not complete gladLoaderLoadGL\nError: %d", SuccessGlad);
+		wglDeleteContext(NewGLContext);
+		return 0;
+	}
+	
+	//wglSwapIntervalEXT(1)
+	
+	return NewGLContext;
+	
+}
 
-	int Size = Backbuffer.Height * Backbuffer.Pitch;
-	Backbuffer.BitmapMemory = (uint8_t*)VirtualAlloc(0, Size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-	Assert(((uintptr_t)Backbuffer.BitmapMemory % 16) == 0 );
-	Assert(Backbuffer.BitmapMemory);
-#endif
+const char* VertexShaderSource =
+R"(
+	#version 330 core
 	
-	return 1;
+	layout (location = 0) in vec2 aPos;
+	layout (location = 1) in vec2 aTexCoord;
+	
+	out vec2 TexCoord;
+	void main()
+	{
+		gl_Position = vec4(aPos, 0.0f, 1.0f);
+		TexCoord = aTexCoord;
+	}
+)";
+const char* FragmentShaderSource =
+R"(
+	#version 330 core
+	
+	out vec4 FragColour;
+	in vec2 TexCoord;
+	uniform sampler2D BrickTexture;
+	void main()
+	{
+		float AlphaScale = 0.2f;
+		//FragColour = vec4(TexCoord, 0.0f, 1.0f);
+		FragColour = texture(BrickTexture, TexCoord);
+		FragColour.rgb *= AlphaScale;
+		FragColour.a *= AlphaScale;
+	}
+)";
+
+void PrepFrame(GLuint* VAO, GLuint* ShaderProgram)
+{
+/*float Vertices[] = 
+	{
+		0.5f,  0.5f, //Top right
+	   -0.5f,  0.5f, //Top left
+	   -0.5f, -0.5f, //Bottom left
+		
+	   -0.5f, -0.5f, //Bottom left
+	    0.5f,  -0.5f, //Bottom right
+		0.5f,  0.5f, //Top right
+	};*/
+	float Vertices[] = 
+	{
+		0.5f,  0.5f, 1.0f, 1.0f,//Top right
+	   -0.5f,  0.5f, 0.0f, 1.0f,//Top left
+	   -0.5f, -0.5f, 0.0f, 0.0f,//Bottom left
+	    0.5f, -0.5f, 1.0f, 0.0f,//Bottom right
+
+	};
+	
+	unsigned int Indices[] =
+	{
+		0, 1, 2,
+		2, 3, 0
+	};
+	
+	GLuint VBO, EBO;
+	glGenVertexArrays(1, VAO);
+	glBindVertexArray(*VAO);
+	
+	glGenBuffers(1, &VBO);
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	
+	glBufferData(GL_ARRAY_BUFFER, sizeof(Vertices), Vertices, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(0);
+	
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+	glEnableVertexAttribArray(1);
+	
+	glGenBuffers(1, &EBO);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(Indices), Indices, GL_STATIC_DRAW);
+	
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindVertexArray(0);
+	
+	
+	GLint GLSuccess;
+	GLchar InfoLog[512];
+	
+	GLuint VertexShader = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(VertexShader, 1, &VertexShaderSource, 0);
+	glCompileShader(VertexShader);
+	
+	glGetShaderiv(VertexShader, GL_COMPILE_STATUS, &GLSuccess);
+	if(!GLSuccess)
+	{
+		glGetShaderInfoLog(VertexShader, 512, 0, InfoLog);
+		Dialog("ERROR: Vertex shader compilation failed\nLog: %s", InfoLog);
+	}
+	
+	GLuint FragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(FragmentShader, 1, &FragmentShaderSource, 0);
+	glCompileShader(FragmentShader);
+	
+	glGetShaderiv(FragmentShader, GL_COMPILE_STATUS, &GLSuccess);
+	if(!GLSuccess)
+	{
+		glGetShaderInfoLog(FragmentShader, 512, 0, InfoLog);
+		Dialog("ERROR: Fragment shader compilation failed\nLog: %s", InfoLog);
+	}
+	
+	*ShaderProgram = glCreateProgram();
+	glAttachShader(*ShaderProgram, VertexShader);
+	glAttachShader(*ShaderProgram, FragmentShader);
+	glLinkProgram(*ShaderProgram);
+	
+	glGetProgramiv(*ShaderProgram, GL_LINK_STATUS, &GLSuccess);
+	if(!GLSuccess)
+	{
+		glGetShaderInfoLog(*ShaderProgram, 512, 0, InfoLog);
+		Dialog("ERROR: Shader program linking failed\nLog: %s", InfoLog);
+	}
+	
+	glDeleteShader(VertexShader);
+	glDeleteShader(FragmentShader);
+	
+	glViewport(0, 0, 640, 480);
+}
+
+struct image
+{
+	GLuint TextureID;
+	int Width;
+	int Height;
+	int Format;
+	void* Data;
+	const char* Filename;
+};
+
+image LoadImage(const char* Filename)
+{
+	image Image = {};
+	int Channels;
+	int ChanneslsForce = 4;
+	stbi_set_flip_vertically_on_load(1);
+	unsigned char* Data = stbi_load(Filename, &Image.Width, &Image.Height, &Channels, ChanneslsForce);
+	if(Data)
+	{
+		Image.Data = Data;
+		Image.Filename = Filename;
+		Image.Format = GL_RGBA;
+	}
+	return Image;
+}
+
+float UInt255To1(uint32_t Value)
+{
+	float Result = Value / 255.0f;
+	return Result;
+}
+
+uint8_t RoundFloatToUInt8(float Value)
+{
+	uint8_t Result = (uint8_t)(Value + 0.5f);
+	return Result;
+}
+
+void PremultiplyAlpha(image* Image)
+{
+	uint8_t* Data = (uint8_t*)Image->Data;
+	for(int Y = 0; Y < Image->Height; Y++)
+	{
+		uint32_t* Row = (uint32_t*)Data;
+		for(int X = 0; X < Image->Width; X++)
+		{
+			uint32_t* Pixel = Row + X;
+			
+			uint8_t R255 = (uint8_t)((*Pixel) >> 0);
+			uint8_t G255 = (uint8_t)((*Pixel) >> 8);
+			uint8_t B255 = (uint8_t)((*Pixel) >> 16);
+			uint8_t A255 = (uint8_t)((*Pixel) >> 24);
+			float A1 = UInt255To1(A255);
+			
+			R255 = RoundFloatToUInt8(R255 * A1);
+			G255 = RoundFloatToUInt8(G255 * A1);
+			B255 = RoundFloatToUInt8(B255 * A1);
+			
+			uint32_t NewPixel = (A255 << 24) | (B255 << 16) | (G255 << 8) | (R255 << 0);
+			*Pixel = NewPixel;
+		}
+		
+		Data += Image->Width * 4;
+	}
 }
 
 IXAudio2* InitalizeXAudio2(HWND WindowHandle)
@@ -562,6 +842,18 @@ int Win32ReadFile(const LPCWSTR Path)
 	
 }
 
+void OrthographicProjectionMatrix(float* ProjMatrix, int Left, int Bottom, int Right, int Top)
+{
+	float XScale = 2.0f / (Right - Left);
+	float YScale = 2.0f / (Top - Bottom);
+	float XTrans = -(Right + Left) / (float)(Right - Left);
+	float YTrans = -(Top + Bottom) / (float)(Top - Bottom);
+	
+	ProjMatrix[0] = XScale; ProjMatrix[1] = 0; 		 ProjMatrix[2] = XTrans;
+	ProjMatrix[3] = 0; 		ProjMatrix[4] = YScale;  ProjMatrix[5] = YTrans;
+	ProjMatrix[6] = 0; 		ProjMatrix[7] = 0; 		 ProjMatrix[8] = 0;
+						  
+}
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
 	(void)hPrevInstance;
@@ -578,8 +870,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		return EXIT_FAILURE;
 	}
 	//Step 2 BitBlt/StretchDIBits preamble
-	int BackbufferResult = BackbufferInitialization(WindowHandle);
-	if(!BackbufferResult)
+	HDC WindowDC = GetDC(WindowHandle);
+	HGLRC NewGLContext = InitializeOpenGL(WindowDC);
+	if(!NewGLContext)
 	{
 		return EXIT_FAILURE;
 	}
@@ -613,7 +906,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		return EXIT_FAILURE;
 	}
 	
-#if 1
+#if 0
 	XAudio2Buffer.SourceVoice->Start();
 #endif
 
@@ -635,12 +928,35 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	ShowWindow(WindowHandle, nCmdShow);
 	UpdateWindow(WindowHandle);
 	
+	GLuint VAO, ShaderProgram;
+	PrepFrame(&VAO, &ShaderProgram);
+	image Image = LoadImage("brick_test.png");
+	if(!Image.Data)
+	{
+		Dialog("Could not load image");
+		return EXIT_FAILURE;
+	}
+	PremultiplyAlpha(&Image);
+	
+	glGenTextures(1, &Image.TextureID);
+	glBindTexture(GL_TEXTURE_2D, Image.TextureID);
+	
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, Image.Width, Image.Height, 0, Image.Format, GL_UNSIGNED_BYTE, Image.Data);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // For premultiplied alpha
+	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	
 	bool Running = true;
 	MSG Msg = {};
-	
 	while(Running)
 	{
-		
 		while(PeekMessage(&Msg, NULL, 0, 0, PM_REMOVE))
 		{
 			if(Msg.message == WM_QUIT) { Running = false; break; }
@@ -648,21 +964,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			DispatchMessage(&Msg);
 		}
 		
+		glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+		
+		glUseProgram(ShaderProgram);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, Image.TextureID);
+		
+		glUniform1i(glGetUniformLocation(ShaderProgram, "BrickTexture"), 0);
+		glBindVertexArray(VAO);
+		//glDrawArrays(GL_TRIANGLES, 0, 6);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+		
+		SwapBuffers(WindowDC);
+		
 	}
 	
 	//Cleanup
 	XAudio2->Release();
 	CoUninitialize();
-	if(Backbuffer.BitmapHandle) 
-	{ 
-		DeleteObject(Backbuffer.BitmapHandle); 
-		Backbuffer.BitmapHandle = 0; 
-	}
-	if(Backbuffer.BitmapDC)
-	{ 
-		DeleteDC(Backbuffer.BitmapDC); 
-		Backbuffer.BitmapDC = 0; 
-	}
+	
+	ReleaseDC(WindowHandle, WindowDC);
 	return (int)Msg.wParam;
 		
 }
