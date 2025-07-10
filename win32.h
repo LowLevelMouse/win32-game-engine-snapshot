@@ -76,6 +76,7 @@ struct image
 	GLuint TextureID;
 	int Width;
 	int Height;
+	int Pitch;
 	int Format;
 	void* Data;
 	const char* Filename;

@@ -56,21 +56,6 @@ void* PushSizeAligned(memory_arena* Arena, size_t Size, size_t Alignment)
 	return Result;
 }
 
-int ClampInt0ToBound(int Value, int Bound)
-{
-	if(Value < 0)
-	{
-		Value = 0;
-	}
-	
-	if(Value > Bound)
-	{
-		Value = Bound;
-	}
-	
-	return Value;
-}
-
 
 LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM LParam)
 {
@@ -316,6 +301,7 @@ void PrepFrame(GLuint* VAO, GLuint* ShaderProgram)
 	glViewport(0, 0, 640, 480);
 }
 
+//Data should not have padding as far as I'm aware
 image LoadImage(const char* Filename)
 {
 	image Image = {};
@@ -328,6 +314,7 @@ image LoadImage(const char* Filename)
 		Image.Data = Data;
 		Image.Filename = Filename;
 		Image.Format = GL_RGBA;
+		Image.Pitch = Image.Width * ChanneslsForce;
 	}
 	return Image;
 }
@@ -344,6 +331,28 @@ uint8_t RoundFloatToUInt8(float Value)
 	return Result;
 }
 
+uint8_t MinUInt8(uint8_t A, uint8_t B)
+{
+	uint8_t Result = A;
+	if(A > B)
+	{
+		Result = B;
+	}
+	
+	return Result;
+}
+
+uint8_t MaxUint8(uint8_t A, uint8_t B)
+{
+	uint8_t Result = A;
+	if(A < B)
+	{
+		Result = B;
+	}
+	
+	return Result;
+}
+
 void PremultiplyAlpha(image* Image)
 {
 	uint8_t* Data = (uint8_t*)Image->Data;
@@ -353,23 +362,89 @@ void PremultiplyAlpha(image* Image)
 		for(int X = 0; X < Image->Width; X++)
 		{
 			uint32_t* Pixel = Row + X;
-			
 			uint8_t R255 = (uint8_t)((*Pixel) >> 0);
 			uint8_t G255 = (uint8_t)((*Pixel) >> 8);
 			uint8_t B255 = (uint8_t)((*Pixel) >> 16);
 			uint8_t A255 = (uint8_t)((*Pixel) >> 24);
 			float A1 = UInt255To1(A255);
 			
-			R255 = RoundFloatToUInt8(R255 * A1);
-			G255 = RoundFloatToUInt8(G255 * A1);
-			B255 = RoundFloatToUInt8(B255 * A1);
-			
+			R255 = MaxUint8(MinUInt8(RoundFloatToUInt8(R255 * A1), 255), 0);
+			G255 = MaxUint8(MinUInt8(RoundFloatToUInt8(G255 * A1), 255), 0);
+			B255 = MaxUint8(MinUInt8(RoundFloatToUInt8(B255 * A1), 255), 0);
+
 			uint32_t NewPixel = (A255 << 24) | (B255 << 16) | (G255 << 8) | (R255 << 0);
 			*Pixel = NewPixel;
 		}
 		
-		Data += Image->Width * 4;
+		Data += Image->Pitch;
 	}
+	
+}
+
+void PremultiplyAlpha_4x(image* Image)
+{
+	__m128i I255_4x = _mm_set1_epi32(255);
+	__m128i I0_4x =  _mm_set1_epi32(0);
+	__m128i MaskFF = _mm_set1_epi32(0xFF);
+			
+	uint8_t* Data = (uint8_t*)Image->Data;
+	for(int Y = 0; Y < Image->Height; Y++)
+	{
+		uint32_t* Row = (uint32_t*)Data;
+		int X = 0;
+		for(; X <= Image->Width - 4; X+= 4)
+		{
+			uint32_t* Pixel = Row + X;
+			__m128i Pixel_4x = _mm_loadu_si128((__m128i*)Pixel);
+			
+			__m128i Red_4x = _mm_and_si128(Pixel_4x, MaskFF);
+			__m128i Green_4x = _mm_and_si128(_mm_srli_epi32(Pixel_4x, 8), MaskFF);
+			__m128i Blue_4x = _mm_and_si128(_mm_srli_epi32(Pixel_4x, 16), MaskFF);
+			__m128i Alpha_4x = _mm_and_si128(_mm_srli_epi32(Pixel_4x, 24), MaskFF);
+
+			__m128 A1_4x = _mm_mul_ps(_mm_cvtepi32_ps(Alpha_4x), _mm_set1_ps(1.0f / 255.0f));
+			
+			__m128 Red255_4x_Premultiply = _mm_mul_ps(_mm_cvtepi32_ps(Red_4x), A1_4x);
+			__m128i Red255_4x_Rounded = _mm_cvtps_epi32(Red255_4x_Premultiply);
+			__m128i Red255_4x_Clamped = _mm_max_epi32(_mm_min_epi32(Red255_4x_Rounded, I255_4x), I0_4x);
+			
+			__m128 Green255_4x_Premultiply = _mm_mul_ps(_mm_cvtepi32_ps(Green_4x), A1_4x);
+			__m128i Green255_4x_Rounded = _mm_cvtps_epi32(Green255_4x_Premultiply);
+			__m128i Green255_4x_Clamped = _mm_max_epi32(_mm_min_epi32(Green255_4x_Rounded, I255_4x), I0_4x);
+			__m128i Green255_4x_Shifted = _mm_slli_epi32(Green255_4x_Clamped, 8);
+			
+			__m128 Blue255_4x_Premultiply = _mm_mul_ps(_mm_cvtepi32_ps(Blue_4x), A1_4x);
+			__m128i Blue255_4x_Rounded = _mm_cvtps_epi32(Blue255_4x_Premultiply);
+			__m128i Blue255_4x_Clamped =_mm_max_epi32(_mm_min_epi32(Blue255_4x_Rounded, I255_4x), I0_4x);
+			__m128i Blue255_4x_Shifted = _mm_slli_epi32(Blue255_4x_Clamped, 16);
+			
+			__m128i Alpha255_4x_Shifted = _mm_slli_epi32(Alpha_4x, 24);
+			
+			__m128i Packed = _mm_or_si128(Alpha255_4x_Shifted, _mm_or_si128(Blue255_4x_Shifted, _mm_or_si128(Green255_4x_Shifted, Red255_4x_Clamped)));
+			_mm_storeu_si128((__m128i*)Pixel, Packed);
+
+		}
+		
+		for(; X < Image->Width; X++)
+		{
+			uint32_t* Pixel = Row + X;
+			uint8_t R255 = (uint8_t)((*Pixel) >> 0);
+			uint8_t G255 = (uint8_t)((*Pixel) >> 8);
+			uint8_t B255 = (uint8_t)((*Pixel) >> 16);
+			uint8_t A255 = (uint8_t)((*Pixel) >> 24);
+			float A1 = UInt255To1(A255);
+			
+			R255 = MaxUint8(MinUInt8(RoundFloatToUInt8(R255 * A1), 255), 0);
+			G255 = MaxUint8(MinUInt8(RoundFloatToUInt8(G255 * A1), 255), 0);
+			B255 = MaxUint8(MinUInt8(RoundFloatToUInt8(B255 * A1), 255), 0);
+
+			uint32_t NewPixel = (A255 << 24) | (B255 << 16) | (G255 << 8) | (R255 << 0);
+			*Pixel = NewPixel;
+		}
+
+		Data += Image->Pitch;
+	}
+	
 }
 
 IXAudio2* InitalizeXAudio2(HWND WindowHandle)
@@ -635,7 +710,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		Dialog("Could not load image");
 		return EXIT_FAILURE;
 	}
+	
+#if 0
 	PremultiplyAlpha(&Image);
+#else
+	PremultiplyAlpha_4x(&Image);
+#endif
 	
 	glGenTextures(1, &Image.TextureID);
 	glBindTexture(GL_TEXTURE_2D, Image.TextureID);
