@@ -219,16 +219,16 @@ HGLRC InitializeOpenGL(HDC WindowDC)
 	
 }
 
-void PrepFrame(GLuint* VAO, GLuint* ShaderProgram)
+void PrepFrame(GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float* Vertices, size_t VerticesSize)
 {
-	float Vertices[] = 
+	/*float Vertices[] = 
 	{
 		0.5f,  0.5f, 1.0f, 1.0f,//Top right
 	   -0.5f,  0.5f, 0.0f, 1.0f,//Top left
 	   -0.5f, -0.5f, 0.0f, 0.0f,//Bottom left
 	    0.5f, -0.5f, 1.0f, 0.0f,//Bottom right
 
-	};
+	};*/
 	
 	unsigned int Indices[] =
 	{
@@ -236,14 +236,14 @@ void PrepFrame(GLuint* VAO, GLuint* ShaderProgram)
 		2, 3, 0
 	};
 	
-	GLuint VBO, EBO;
+	GLuint EBO;
 	glGenVertexArrays(1, VAO);
 	glBindVertexArray(*VAO);
 	
-	glGenBuffers(1, &VBO);
-	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	glGenBuffers(1, VBO);
+	glBindBuffer(GL_ARRAY_BUFFER, *VBO);
 	
-	glBufferData(GL_ARRAY_BUFFER, sizeof(Vertices), Vertices, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, VerticesSize, Vertices, GL_STATIC_DRAW);
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
 	glEnableVertexAttribArray(0);
 	
@@ -622,10 +622,43 @@ void OrthographicProjectionMatrix(float* ProjMatrix, int Left, int Bottom, int R
 	float XTrans = -(Right + Left) / (float)(Right - Left);
 	float YTrans = -(Top + Bottom) / (float)(Top - Bottom);
 	
-	ProjMatrix[0] = XScale; ProjMatrix[1] = 0; 		 ProjMatrix[2] = XTrans;
-	ProjMatrix[3] = 0; 		ProjMatrix[4] = YScale;  ProjMatrix[5] = YTrans;
-	ProjMatrix[6] = 0; 		ProjMatrix[7] = 0; 		 ProjMatrix[8] = 0;
+	ProjMatrix[0] = XScale; ProjMatrix[4] = 0; 		 ProjMatrix[8] = 0;       ProjMatrix[12] = XTrans;
+	ProjMatrix[1] = 0; 		ProjMatrix[5] = YScale;  ProjMatrix[9] = 0;       ProjMatrix[13] = YTrans;
+	ProjMatrix[2] = 0; 		ProjMatrix[6] = 0; 		 ProjMatrix[10] = -1.0f;  ProjMatrix[14] = 0;
+	ProjMatrix[3] = 0; 		ProjMatrix[7] = 0; 		 ProjMatrix[11] = 0;      ProjMatrix[15] = 1.0f;
 						  
+}
+
+void PollInput(input* Input)
+{
+	for(int Key = 0; Key < VK_CODE_MAX; Key++)
+	{
+		bool IsDown = (GetAsyncKeyState(Key) & 0x8000) != 0;
+		Input->IsDown[Key] = IsDown;
+	}
+}
+
+void UpdateInputState(input* Input)
+{
+	for(int Key = 0; Key < VK_CODE_MAX; Key++)
+	{
+		Input->Pressed[Key] = (Input->IsDown[Key] && !Input->WasDown[Key]);
+		Input->Released[Key] = (!Input->IsDown[Key] && Input->WasDown[Key]);
+	}
+}
+void StoreInputState(input* Input)
+{
+	for(int Key = 0; Key < VK_CODE_MAX; Key++)
+	{	
+		Input->WasDown[Key] = Input->IsDown[Key];
+	}
+}
+
+void GetInputStandard(input* Input)
+{
+	PollInput(Input);
+	UpdateInputState(Input);
+	StoreInputState(Input);
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
@@ -636,6 +669,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	
 	memory_arena MemoryArena = {};
 	InitalizeArena(&MemoryArena, Megabytes(500));
+	
+	input Input;
 
 	//Step 1 Window Initialization
 	HWND WindowHandle = WindowInitialization(hInstance);
@@ -702,8 +737,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	ShowWindow(WindowHandle, nCmdShow);
 	UpdateWindow(WindowHandle);
 	
-	GLuint VAO, ShaderProgram;
-	PrepFrame(&VAO, &ShaderProgram);
+	GLuint VAO, VBO, ShaderProgram;
+	/*float Vertices[] = 
+	{
+		0.5f,  0.5f, 1.0f, 1.0f,//Top right
+	   -0.5f,  0.5f, 0.0f, 1.0f,//Top left
+	   -0.5f, -0.5f, 0.0f, 0.0f,//Bottom left
+	    0.5f, -0.5f, 1.0f, 0.0f,//Bottom right
+
+	};*/
+	entity Entity = {};
+	Entity.X = 150;
+	Entity.Y = 150;
+	Entity.Width = 640 - 2*150;
+	Entity.Height = 480 - 2*150;
+	
+	float Vertices[] = 
+	{
+	   Entity.X + Entity.Width,  Entity.Y + Entity.Height, 1.0f, 1.0f,//Top right
+	   Entity.X,                 Entity.Y + Entity.Height, 0.0f, 1.0f,//Top left
+	   Entity.X,                 Entity.Y,                 0.0f, 0.0f,//Bottom left
+	   Entity.X + Entity.Width,  Entity.Y,                 1.0f, 0.0f,//Bottom right
+
+	};
+	int VerticesSize = sizeof(Vertices);
+	PrepFrame(&VAO, &VBO, &ShaderProgram, Vertices, VerticesSize);
 	image Image = LoadImage("brick_test.png");
 	if(!Image.Data)
 	{
@@ -711,26 +769,34 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		return EXIT_FAILURE;
 	}
 	
+	Entity.Image = &Image;
+	
 #if 0
 	PremultiplyAlpha(&Image);
 #else
 	PremultiplyAlpha_4x(&Image);
 #endif
 	
-	glGenTextures(1, &Image.TextureID);
-	glBindTexture(GL_TEXTURE_2D, Image.TextureID);
+	glGenTextures(1, &Entity.Image->TextureID);
+	glBindTexture(GL_TEXTURE_2D, Entity.Image->TextureID);
 	
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, Image.Width, Image.Height, 0, Image.Format, GL_UNSIGNED_BYTE, Image.Data);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, Entity.Image->Width, Entity.Image->Height, 0, Entity.Image->Format, GL_UNSIGNED_BYTE, Entity.Image->Data);
 	glGenerateMipmap(GL_TEXTURE_2D);
+	//GLuint TexLoc = glGetUniformLocation(ShaderProgram, "BrickTexture");
 	
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // For premultiplied alpha
 	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	
+	float ProjMatrix[16];
+	OrthographicProjectionMatrix(ProjMatrix, 0, 0, 640, 480);
+	GLuint ProjLoc = glGetUniformLocation(ShaderProgram, "ProjMatrix");
+	GLuint BrickLoc = glGetUniformLocation(ShaderProgram, "BrickTexture");
 	
 	bool Running = true;
 	MSG Msg = {};
@@ -743,14 +809,54 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			DispatchMessage(&Msg);
 		}
 		
+		GetInputStandard(&Input);
+		
+		if(Input.WasDown[VK_RIGHT])
+		{
+			Entity.X += 1;
+			Vertices[0] = Entity.X + Entity.Width;
+			Vertices[4] = Entity.X;
+			Vertices[8] = Entity.X;
+			Vertices[12] = Entity.X + Entity.Width;
+		}
+		else if (Input.WasDown[VK_LEFT])
+		{
+			Entity.X -= 1;
+			Vertices[0] = Entity.X + Entity.Width;
+			Vertices[4] = Entity.X;
+			Vertices[8] = Entity.X;
+			Vertices[12] = Entity.X + Entity.Width;
+		}
+		
+		if(Input.WasDown[VK_UP])
+		{
+			Entity.Y += 1;
+			Vertices[1] = Entity.Y + Entity.Height;
+			Vertices[5] = Entity.Y + Entity.Height;
+			Vertices[9] = Entity.Y;
+			Vertices[13] = Entity.Y;
+		}
+		else if(Input.WasDown[VK_DOWN])
+		{
+			Entity.Y -= 1;
+			Vertices[1] = Entity.Y + Entity.Height;
+			Vertices[5] = Entity.Y + Entity.Height;
+			Vertices[9] = Entity.Y;
+			Vertices[13] = Entity.Y;
+		}
+		
 		glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 		
+		glBindBuffer(GL_ARRAY_BUFFER, VBO);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
 		glUseProgram(ShaderProgram);
+		
+		glUniformMatrix4fv(ProjLoc, 1, GL_FALSE, ProjMatrix);
+		glUniform1i(BrickLoc, 0);
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, Image.TextureID);
 		
-		glUniform1i(glGetUniformLocation(ShaderProgram, "BrickTexture"), 0);
 		glBindVertexArray(VAO);
 		//glDrawArrays(GL_TRIANGLES, 0, 6);
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -775,10 +881,12 @@ R"(
 	layout (location = 0) in vec2 aPos;
 	layout (location = 1) in vec2 aTexCoord;
 	
+	uniform mat4 ProjMatrix;
+	
 	out vec2 TexCoord;
 	void main()
 	{
-		gl_Position = vec4(aPos, 0.0f, 1.0f);
+		gl_Position = ProjMatrix * vec4(aPos, 0.0f, 1.0f);
 		TexCoord = aTexCoord;
 	}
 )";

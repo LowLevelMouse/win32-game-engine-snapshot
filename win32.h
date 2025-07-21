@@ -44,6 +44,8 @@
 
 #define ARGB32(A, R, G, B) (uint32_t)( (A << 24) | (R << 16) | (G << 8) | B )
 
+#define VK_CODE_MAX 256
+
 struct memory_arena
 {
 	size_t Size;
@@ -80,6 +82,23 @@ struct image
 	int Format;
 	void* Data;
 	const char* Filename;
+};
+
+struct entity
+{
+	image* Image;
+	float X, Y;
+	float Width, Height;
+	float ScaleX, ScaleY;
+	float Theta;
+};
+
+struct input
+{
+	bool IsDown[256];
+	bool WasDown[256];
+	bool Pressed[256];
+	bool Released[256];	
 };
 
 extern const char* VertexShaderSource;
