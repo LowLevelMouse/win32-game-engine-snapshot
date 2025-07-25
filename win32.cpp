@@ -137,6 +137,7 @@ HGLRC InitializeOpenGL(HDC WindowDC)
 	Pfd.iLayerType = PFD_MAIN_PLANE;
 	
 	int PixelFormat = ChoosePixelFormat(WindowDC, &Pfd);
+	DescribePixelFormat(WindowDC, PixelFormat, sizeof(Pfd), &Pfd); 
 	if(!PixelFormat)
 	{
 		Dialog("Could not get the pixel format\nError: %d", GetLastError());
@@ -213,7 +214,7 @@ HGLRC InitializeOpenGL(HDC WindowDC)
 		return 0;
 	}
 	
-	//wglSwapIntervalEXT(1)
+	wglSwapIntervalEXT(1);
 	
 	return NewGLContext;
 	
@@ -221,16 +222,7 @@ HGLRC InitializeOpenGL(HDC WindowDC)
 
 void PrepFrame(GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float* Vertices, size_t VerticesSize)
 {
-	/*float Vertices[] = 
-	{
-		0.5f,  0.5f, 1.0f, 1.0f,//Top right
-	   -0.5f,  0.5f, 0.0f, 1.0f,//Top left
-	   -0.5f, -0.5f, 0.0f, 0.0f,//Bottom left
-	    0.5f, -0.5f, 1.0f, 0.0f,//Bottom right
-
-	};*/
-	
-	unsigned int Indices[] =
+	unsigned int QuadIndices[] =
 	{
 		0, 1, 2,
 		2, 3, 0
@@ -243,7 +235,8 @@ void PrepFrame(GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float* Vertices,
 	glGenBuffers(1, VBO);
 	glBindBuffer(GL_ARRAY_BUFFER, *VBO);
 	
-	glBufferData(GL_ARRAY_BUFFER, VerticesSize, Vertices, GL_STATIC_DRAW);
+	//glBufferData(GL_ARRAY_BUFFER, VerticesSize, Vertices, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, VerticesSize, Vertices, GL_DYNAMIC_DRAW);
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
 	glEnableVertexAttribArray(0);
 	
@@ -252,7 +245,7 @@ void PrepFrame(GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float* Vertices,
 	
 	glGenBuffers(1, &EBO);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(Indices), Indices, GL_STATIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(QuadIndices), QuadIndices, GL_STATIC_DRAW);
 	
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
@@ -615,7 +608,7 @@ int Win32ReadFile(const LPCWSTR Path)
 	
 }
 
-void OrthographicProjectionMatrix(float* ProjMatrix, int Left, int Bottom, int Right, int Top)
+void OrthographicProjectionMatrix(float* ProjMatrix, float Left, float Bottom, float Right, float Top)
 {
 	float XScale = 2.0f / (Right - Left);
 	float YScale = 2.0f / (Top - Bottom);
@@ -661,6 +654,54 @@ void GetInputStandard(input* Input)
 	StoreInputState(Input);
 }
 
+//This needs to be more descriptive and potentially take in dynamic paramaters so we can account for a different layout
+void SetQuadVertices(float* Vertices, float X, float Y, float Width, float Height)
+{
+	//Modify X of each vertex
+	Vertices[0] = (X + Width);
+	Vertices[4] = X;
+	Vertices[8] = X;
+	Vertices[12] = (X + Width);
+
+	//Modify Y of each vertex
+	Vertices[1] = (Y + Height);
+	Vertices[5] = (Y + Height);
+	Vertices[9] = Y;
+	Vertices[13] = Y;
+}
+
+void UpdateGameState(input* Input, entity* Entity, camera* Camera, float* Vertices)
+{	
+	float DX = 0.0f;
+	float DY = 0.0f;
+	
+	bool Right = Input->WasDown[VK_RIGHT];
+	bool Left = Input->WasDown[VK_LEFT];
+	bool Up = Input->WasDown[VK_UP];
+	bool Down = Input->WasDown[VK_DOWN];
+	
+	if(Right) DX = 1.0f;
+	if(Left) DX = -1.0f;
+	if(Up) DY = 1.0f;
+	if(Down) DY = -1.0f;
+	
+
+	float Magnitude = sqrtf(DX * DX + DY * DY);
+	if(Magnitude > 0.0f)
+	{
+		DX /= Magnitude;
+		DY /= Magnitude;
+		
+		Entity->X += DX;
+		Entity->Y += DY;
+		Camera->X += DX;
+		Camera->Y += DY;
+		
+		SetQuadVertices(Vertices, Entity->X, Entity->Y, Entity->Width, Entity->Height);
+	}
+}
+
+//NEED TO MAKE TIMING ROBUST!!!
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
 	(void)hPrevInstance;
@@ -669,8 +710,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	
 	memory_arena MemoryArena = {};
 	InitalizeArena(&MemoryArena, Megabytes(500));
-	
-	input Input;
 
 	//Step 1 Window Initialization
 	HWND WindowHandle = WindowInitialization(hInstance);
@@ -678,7 +717,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	{
 		return EXIT_FAILURE;
 	}
-	//Step 2 BitBlt/StretchDIBits preamble
+	//Step 2 Init OpenGL
 	HDC WindowDC = GetDC(WindowHandle);
 	HGLRC NewGLContext = InitializeOpenGL(WindowDC);
 	if(!NewGLContext)
@@ -733,11 +772,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		return EXIT_FAILURE;
 	}
 	
-	//Make the window visible and force a repaint
-	ShowWindow(WindowHandle, nCmdShow);
-	UpdateWindow(WindowHandle);
-	
-	GLuint VAO, VBO, ShaderProgram;
 	/*float Vertices[] = 
 	{
 		0.5f,  0.5f, 1.0f, 1.0f,//Top right
@@ -746,22 +780,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	    0.5f, -0.5f, 1.0f, 0.0f,//Bottom right
 
 	};*/
+	
+	
+	GLuint VAO, VBO, ShaderProgram;
+	float DummyVerticies[] = 
+	{
+	//  x, y, u, v
+		0, 0, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 0,
+	};
+	int DummyVerticesSize = sizeof(DummyVerticies);
+	PrepFrame(&VAO, &VBO, &ShaderProgram, DummyVerticies, DummyVerticesSize);
+	
+	
 	entity Entity = {};
 	Entity.X = 150;
 	Entity.Y = 150;
 	Entity.Width = 640 - 2*150;
 	Entity.Height = 480 - 2*150;
 	
-	float Vertices[] = 
-	{
-	   Entity.X + Entity.Width,  Entity.Y + Entity.Height, 1.0f, 1.0f,//Top right
-	   Entity.X,                 Entity.Y + Entity.Height, 0.0f, 1.0f,//Top left
-	   Entity.X,                 Entity.Y,                 0.0f, 0.0f,//Bottom left
-	   Entity.X + Entity.Width,  Entity.Y,                 1.0f, 0.0f,//Bottom right
-
-	};
-	int VerticesSize = sizeof(Vertices);
-	PrepFrame(&VAO, &VBO, &ShaderProgram, Vertices, VerticesSize);
 	image Image = LoadImage("brick_test.png");
 	if(!Image.Data)
 	{
@@ -776,6 +815,32 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 #else
 	PremultiplyAlpha_4x(&Image);
 #endif
+	
+	float Vertices[] = 
+	{
+	   Entity.X + Entity.Width,  Entity.Y + Entity.Height, 1.0f, 1.0f,//Top right
+	   Entity.X,                 Entity.Y + Entity.Height, 0.0f, 1.0f,//Top left
+	   Entity.X,                 Entity.Y,                 0.0f, 0.0f,//Bottom left
+	   Entity.X + Entity.Width,  Entity.Y,                 1.0f, 0.0f,//Bottom right
+
+	};
+	int VerticesSize = sizeof(Vertices);
+	
+	entity Entity2 = {};
+	Entity2.X = 500;
+	Entity2.Y = 150;
+	Entity2.Width = 640 - 2*150;
+	Entity2.Height = 480 - 2*150;
+	
+	float Vertices2[] = 
+	{
+	   Entity2.X + Entity2.Width,  Entity2.Y + Entity2.Height, 1.0f, 1.0f,//Top right
+	   Entity2.X,                 Entity2.Y + Entity2.Height, 0.0f, 1.0f,//Top left
+	   Entity2.X,                 Entity2.Y,                 0.0f, 0.0f,//Bottom left
+	   Entity2.X + Entity2.Width,  Entity2.Y,                 1.0f, 0.0f,//Bottom right
+
+	};
+	int VerticesSize2 = sizeof(Vertices);
 	
 	glGenTextures(1, &Entity.Image->TextureID);
 	glBindTexture(GL_TEXTURE_2D, Entity.Image->TextureID);
@@ -793,15 +858,33 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // For premultiplied alpha
 	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	
+	camera Camera = {0, 0, 640, 480};
+		
 	float ProjMatrix[16];
-	OrthographicProjectionMatrix(ProjMatrix, 0, 0, 640, 480);
+	OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
 	GLuint ProjLoc = glGetUniformLocation(ShaderProgram, "ProjMatrix");
 	GLuint BrickLoc = glGetUniformLocation(ShaderProgram, "BrickTexture");
+	GLuint ColourPos = glGetUniformLocation(ShaderProgram, "Colour");
+	
+	input Input = {};
+	
+	//Make the window visible and force a repaint
+	ShowWindow(WindowHandle, nCmdShow);
+	UpdateWindow(WindowHandle);
+	
+	LARGE_INTEGER PerfFreq;
+	QueryPerformanceFrequency(&PerfFreq);
+	
+	LARGE_INTEGER LastCounter;
+	QueryPerformanceCounter(&LastCounter);
+	
+	LARGE_INTEGER CurrentCounter;
+	double SecondsPerTick = 1.0 / (double)PerfFreq.QuadPart;
 	
 	bool Running = true;
 	MSG Msg = {};
 	while(Running)
-	{
+	{	
 		while(PeekMessage(&Msg, NULL, 0, 0, PM_REMOVE))
 		{
 			if(Msg.message == WM_QUIT) { Running = false; break; }
@@ -809,59 +892,47 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			DispatchMessage(&Msg);
 		}
 		
+		//We are skipping the time spent processing messages
+		QueryPerformanceCounter(&CurrentCounter);
+		
 		GetInputStandard(&Input);
 		
-		if(Input.WasDown[VK_RIGHT])
-		{
-			Entity.X += 1;
-			Vertices[0] = Entity.X + Entity.Width;
-			Vertices[4] = Entity.X;
-			Vertices[8] = Entity.X;
-			Vertices[12] = Entity.X + Entity.Width;
-		}
-		else if (Input.WasDown[VK_LEFT])
-		{
-			Entity.X -= 1;
-			Vertices[0] = Entity.X + Entity.Width;
-			Vertices[4] = Entity.X;
-			Vertices[8] = Entity.X;
-			Vertices[12] = Entity.X + Entity.Width;
-		}
+		UpdateGameState(&Input, &Entity, &Camera, Vertices);
 		
-		if(Input.WasDown[VK_UP])
-		{
-			Entity.Y += 1;
-			Vertices[1] = Entity.Y + Entity.Height;
-			Vertices[5] = Entity.Y + Entity.Height;
-			Vertices[9] = Entity.Y;
-			Vertices[13] = Entity.Y;
-		}
-		else if(Input.WasDown[VK_DOWN])
-		{
-			Entity.Y -= 1;
-			Vertices[1] = Entity.Y + Entity.Height;
-			Vertices[5] = Entity.Y + Entity.Height;
-			Vertices[9] = Entity.Y;
-			Vertices[13] = Entity.Y;
-		}
+		OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
 		
-		glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+		float Alpha = 1.0f;
+		glClearColor(0.2f * Alpha, 0.3f * Alpha, 0.3f * Alpha, Alpha);
 		glClear(GL_COLOR_BUFFER_BIT);
 		
-		glBindBuffer(GL_ARRAY_BUFFER, VBO);
-		glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
 		glUseProgram(ShaderProgram);
 		
+		float FloatTestAlpha = 0.5f;
+		glUniform4f(ColourPos, 1.0f * FloatTestAlpha, 0, 0, FloatTestAlpha);
 		glUniformMatrix4fv(ProjLoc, 1, GL_FALSE, ProjMatrix);
 		glUniform1i(BrickLoc, 0);
+		
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, Image.TextureID);
 		
 		glBindVertexArray(VAO);
 		//glDrawArrays(GL_TRIANGLES, 0, 6);
+		
+		glBindBuffer(GL_ARRAY_BUFFER, VBO);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+		
+		glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize2, Vertices2);
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 		
 		SwapBuffers(WindowDC);
+		
+		double SecondsElapsed = (double)(CurrentCounter.QuadPart - LastCounter.QuadPart) * SecondsPerTick;
+		LastCounter = CurrentCounter;
+		
+		char Buffer[256];
+		_snprintf_s(Buffer, sizeof(Buffer), _TRUNCATE, "Frame Time %.4f s (%.1f FPS)\n", SecondsElapsed, 1.0 / SecondsElapsed);
+		OutputDebugStringA(Buffer);
 		
 	}
 	
@@ -897,12 +968,16 @@ R"(
 	out vec4 FragColour;
 	in vec2 TexCoord;
 	uniform sampler2D BrickTexture;
+	uniform vec4 Colour;
 	void main()
 	{
 		float AlphaScale = 0.2f;
 		//FragColour = vec4(TexCoord, 0.0f, 1.0f);
-		FragColour = texture(BrickTexture, TexCoord);
-		FragColour.rgb *= AlphaScale;
-		FragColour.a *= AlphaScale;
+		//FragColour = texture(BrickTexture, TexCoord);
+		FragColour = Colour;
+		//Premultiply for a test
+		//FragColour *= AlphaScale;
+		//FragColour.a = AlphaScale;
+		//FragColour = vec4(0.2f, 0.0f, 0.0f, 0.2f);
 	}
 )";

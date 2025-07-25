@@ -1,0 +1,18 @@
+GLAD CONFIG
+
+Generator: 
+C/C++
+
+gl: 
+Version 3.3 Core Common
+
+wgl: 
+Version 1.0f
+
+Extensions:
+WGL_ARB_create_context
+WGL_ARB_create_context_profile
+WGL_EXT_swap_control
+
+Options:
+loader

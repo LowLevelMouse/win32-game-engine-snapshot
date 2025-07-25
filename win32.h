@@ -101,6 +101,14 @@ struct input
 	bool Released[256];	
 };
 
+struct camera
+{
+	float X, Y;
+	float Width, Height;
+};
+
+
+
 extern const char* VertexShaderSource;
 extern const char* FragmentShaderSource;
 
