@@ -46,6 +46,8 @@
 
 #define VK_CODE_MAX 256
 
+#define ENTITY_MAX 1000
+
 struct memory_arena
 {
 	size_t Size;
@@ -84,6 +86,12 @@ struct image
 	const char* Filename;
 };
 
+struct collision
+{
+	float X, Y; //Left Bottom
+	float Width, Height;
+};
+
 struct entity
 {
 	image* Image;
@@ -91,6 +99,7 @@ struct entity
 	float Width, Height;
 	float ScaleX, ScaleY;
 	float Theta;
+	collision Collision;
 };
 
 struct input
@@ -103,10 +112,15 @@ struct input
 
 struct camera
 {
-	float X, Y;
+	float X, Y; //Left Bottom
 	float Width, Height;
 };
 
+struct v2
+{
+	float X;
+	float Y;
+};
 
 
 extern const char* VertexShaderSource;

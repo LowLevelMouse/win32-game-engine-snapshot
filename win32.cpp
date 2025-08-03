@@ -102,7 +102,7 @@ HWND WindowInitialization(HINSTANCE hInstance)
 	WindowClass.hInstance = hInstance;
 	WindowClass.lpszClassName = "MyWindowClass";
 	WindowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
-	//WindowClass.hbrBackground = (HBRUSH)(COLOR_WINDOW+1); If we weren't handling WM_PAINT
+	//WindowClass.hbrBackground = (HBRUSH)(COLOR_WINDOW+1); If we weren't handling WM_PAINT and not using OpenGL
 	
 	ATOM ClassID = RegisterClass(&WindowClass);
 	if(ClassID == 0)
@@ -126,7 +126,7 @@ HWND WindowInitialization(HINSTANCE hInstance)
 HGLRC InitializeOpenGL(HDC WindowDC)
 {
 	PIXELFORMATDESCRIPTOR Pfd = {};
-	Pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
+	Pfd.nSize = sizeof(Pfd);
 	Pfd.nVersion = 1;
 	Pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
 	Pfd.iPixelType = PFD_TYPE_RGBA;
@@ -137,7 +137,7 @@ HGLRC InitializeOpenGL(HDC WindowDC)
 	Pfd.iLayerType = PFD_MAIN_PLANE;
 	
 	int PixelFormat = ChoosePixelFormat(WindowDC, &Pfd);
-	DescribePixelFormat(WindowDC, PixelFormat, sizeof(Pfd), &Pfd); 
+	DescribePixelFormat(WindowDC, PixelFormat, sizeof(Pfd), &Pfd); //Used for debugging
 	if(!PixelFormat)
 	{
 		Dialog("Could not get the pixel format\nError: %d", GetLastError());
@@ -236,7 +236,7 @@ void PrepFrame(GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float* Vertices,
 	glBindBuffer(GL_ARRAY_BUFFER, *VBO);
 	
 	//glBufferData(GL_ARRAY_BUFFER, VerticesSize, Vertices, GL_STATIC_DRAW);
-	glBufferData(GL_ARRAY_BUFFER, VerticesSize, Vertices, GL_DYNAMIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, VerticesSize, Vertices, GL_STREAM_DRAW);
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
 	glEnableVertexAttribArray(0);
 	
@@ -512,22 +512,38 @@ int Win32WriteFile(const LPCWSTR Path, const char* Message)
 		return 0;
 	}
 	
-	//Write could be partial, but in almost all cases it won't be, no need for loop
 	DWORD WriteSize = (DWORD)strlen(Message);
-	DWORD Written;
-	BOOL Success = WriteFile(FileWrite, Message, WriteSize, &Written, 0);
-	if(!Success || Written != WriteSize)
-	{
-		DWORD Error = GetLastError(); 
-		Dialog("WriteFile failed\nError %d", Error);
-	}
-	else 
-	{
-		FlushFileBuffers(FileWrite); 
-		//SetEndOfFile(FileWrite); // If we didn't use CREATE_ALWAYS this would be necessary, and SetFilePointer 
-	}
-	CloseHandle(FileWrite);
+	DWORD Written = 0;
+	DWORD TotalWritten = 0;
 	
+	BOOL Success = false;
+	while(TotalWritten < WriteSize)
+	{
+		Success = WriteFile(FileWrite, Message + TotalWritten, WriteSize - TotalWritten, &Written, 0);
+		if(!Success)
+		{
+			DWORD Error = GetLastError(); 
+			Dialog("WriteFile failed\nError %d", Error);
+			return 0;
+		}
+		
+		TotalWritten += Written;
+	}
+	
+	if(TotalWritten == WriteSize)
+	{
+		BOOL Flushed = FlushFileBuffers(FileWrite);
+		if(!Flushed)
+		{
+			DWORD Error = GetLastError(); 
+			Dialog("File buffer flush failed\nError %d", Error);
+			return 0;
+		}
+	}
+	
+	//SetEndOfFile(FileWrite); // If we didn't use CREATE_ALWAYS this would be necessary, and 
+	CloseHandle(FileWrite);
+		
 	return 1;
 }
 
@@ -670,7 +686,7 @@ void SetQuadVertices(float* Vertices, float X, float Y, float Width, float Heigh
 	Vertices[13] = Y;
 }
 
-void UpdateGameState(input* Input, entity* Entity, camera* Camera, float* Vertices)
+void UpdateGameState(input* Input, entity* Entity, camera* Camera)
 {	
 	float DX = 0.0f;
 	float DY = 0.0f;
@@ -680,6 +696,7 @@ void UpdateGameState(input* Input, entity* Entity, camera* Camera, float* Vertic
 	bool Up = Input->WasDown[VK_UP];
 	bool Down = Input->WasDown[VK_DOWN];
 	
+	float Speed = 4.0f;
 	if(Right) DX = 1.0f;
 	if(Left) DX = -1.0f;
 	if(Up) DY = 1.0f;
@@ -692,16 +709,179 @@ void UpdateGameState(input* Input, entity* Entity, camera* Camera, float* Vertic
 		DX /= Magnitude;
 		DY /= Magnitude;
 		
-		Entity->X += DX;
-		Entity->Y += DY;
-		Camera->X += DX;
-		Camera->Y += DY;
+		Entity->X += DX * Speed;
+		Entity->Y += DY * Speed;
+		Camera->X += DX * Speed;
+		Camera->Y += DY * Speed;
 		
-		SetQuadVertices(Vertices, Entity->X, Entity->Y, Entity->Width, Entity->Height);
+		//SetQuadVertices(Vertices, Entity->X, Entity->Y, Entity->Width, Entity->Height);
 	}
 }
 
+collision StandardCollision(entity Entity)
+{
+	collision Collision = {};
+	
+	Collision.X = Entity.X;
+	Collision.Y = Entity.Y;
+	Collision.Width = Entity.Width;
+	Collision.Height = Entity.Height;
+	
+	return Collision;
+}
+
+int AddEntity(entity* Entities, int* EntityCount, float X, float Y, float Width, float Height)
+{
+	int EntityIndex = *EntityCount;
+	
+	entity Entity = {};
+	Entity.X = X;
+	Entity.Y = Y;
+	Entity.Width = Width;
+	Entity.Height = Height;
+	Entity.Collision = StandardCollision(Entity);
+	
+	Entities[(*EntityCount)++] = Entity;
+	
+	return EntityIndex;
+}
+
+void PopulateWorld(entity* Entities, int* EntityCount)
+{
+	float Width = 400;
+	float Height = 200;
+	float PadX = 300;
+	float PadY = 150;
+	
+	float XStart =  Width + 100;
+	float X = XStart;
+	float Y = 0;
+	
+	for(int EntityY = 0; EntityY < 10; EntityY++)
+	{
+		X = XStart;
+		for(int EntityX = 0; EntityX < 10; EntityX++)
+		{
+			AddEntity(Entities, EntityCount, X, Y, Width, Height);
+			
+			X+= Width + PadX;
+		}
+		
+		Y+= Height + PadY;
+	}
+}
+
+bool CollisionCheckPair(float AX, float AY, float AWidth, float AHeight,
+					float BX, float BY, float BWidth, float BHeight)
+{
+	const float Epsilon = 10.0f;
+	bool Collided = false;
+	//Pos + Dim will be 1 greater than the pos so we use strictly < or > no >= or <= since that would be overlapping
+	if( (AX < BX + BWidth + Epsilon) && (AX + AWidth > BX - Epsilon) && (AY < BY + BHeight + Epsilon) && (AY + AHeight > BY - Epsilon) )
+	{
+		Collided = true;
+	}
+	
+	return Collided;
+}
+
+void ApplyCollisionCorrection(v2 NewPosition, entity* CollideEntity, camera* Camera)
+{
+	CollideEntity->X += NewPosition.X;
+	CollideEntity->Y += NewPosition.Y;
+	
+	Camera->X += NewPosition.X;
+	Camera->Y += NewPosition.Y;
+}
+
+v2 CollisionCorrectionTest(entity* CollideEntity, entity* HitEntity)
+{
+	
+	float OverlapAmounts[4] = 
+	{  
+		(CollideEntity->X + CollideEntity->Width) - HitEntity->X,  //Left
+		(HitEntity->X + HitEntity->Width) - CollideEntity->X,     //Right
+		(CollideEntity->Y + CollideEntity->Height) - HitEntity->Y, //Bottom
+		(HitEntity->Y + HitEntity->Height) - CollideEntity->Y,    //Top
+	};
+			
+	float MinAmount = OverlapAmounts[0];
+	int MinWall = 0;
+	for(int Wall = 1; Wall < 4; Wall++)
+	{
+		float OverlapAmount = OverlapAmounts[Wall];
+		if(OverlapAmount < MinAmount)
+		{
+			MinAmount = OverlapAmount;
+			MinWall = Wall;
+		}
+	}
+	
+	v2 NewPosition = {};
+
+	const float Epsilon = 10.0f;
+	
+	switch(MinWall)
+	{
+		case 0: 
+			NewPosition.X = -MinAmount - Epsilon; 
+		break;
+		case 1: 
+			NewPosition.X = MinAmount + Epsilon; 
+		break;
+		case 2: 
+			NewPosition.Y = -MinAmount - Epsilon; 
+		break;
+		case 3: 
+			NewPosition.Y = MinAmount + Epsilon; 
+		break;
+	}
+	
+	return NewPosition;
+}
+
+entity* CollisionCheckGlobal(entity* Entities, int EntityCount, entity* CollideEntity, int CollideEntityIndex, camera* Camera)
+{
+	int Count = 0;
+	entity* HitEntity = 0;
+	for(int EntityIndex = 0; EntityIndex < EntityCount; EntityIndex++)
+	{
+		if(EntityIndex != CollideEntityIndex)
+		{
+			entity* TestEntity = &Entities[EntityIndex];
+			bool Collided = CollisionCheckPair(CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
+			if(Collided)
+			{
+				Count ++;
+				if(Count == 2)
+				{
+					int X = 5;
+				}
+				
+				HitEntity = TestEntity;
+				v2 NewPosition = CollisionCorrectionTest(CollideEntity, HitEntity);
+				//ApplyCollisionCorrection(NewPosition, CollideEntity, Camera);
+				
+				#if 1
+				Collided = CollisionCheckPair(NewPosition.X, NewPosition.Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
+				if(!Collided)
+				{
+					HitEntity = TestEntity;
+					ApplyCollisionCorrection(NewPosition, CollideEntity, Camera);
+				}
+				#endif
+			}
+		}
+		
+	}
+	
+	return HitEntity;
+}
+
+
+///
 //NEED TO MAKE TIMING ROBUST!!!
+///
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
 	(void)hPrevInstance;
@@ -772,15 +952,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		return EXIT_FAILURE;
 	}
 	
-	/*float Vertices[] = 
-	{
-		0.5f,  0.5f, 1.0f, 1.0f,//Top right
-	   -0.5f,  0.5f, 0.0f, 1.0f,//Top left
-	   -0.5f, -0.5f, 0.0f, 0.0f,//Bottom left
-	    0.5f, -0.5f, 1.0f, 0.0f,//Bottom right
-
-	};*/
-	
 	
 	GLuint VAO, VBO, ShaderProgram;
 	float DummyVerticies[] = 
@@ -795,11 +966,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	PrepFrame(&VAO, &VBO, &ShaderProgram, DummyVerticies, DummyVerticesSize);
 	
 	
-	entity Entity = {};
-	Entity.X = 150;
-	Entity.Y = 150;
-	Entity.Width = 640 - 2*150;
-	Entity.Height = 480 - 2*150;
+	entity Entities[ENTITY_MAX];
+	int EntityCount = 0;
+	
+	int PlayerEntityIndex = AddEntity(Entities, &EntityCount, 0, 0, 640 - 2*150, 480 - 2*150); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
+	entity* PlayerEntity = &Entities[PlayerEntityIndex];
 	
 	image Image = LoadImage("brick_test.png");
 	if(!Image.Data)
@@ -808,7 +979,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		return EXIT_FAILURE;
 	}
 	
-	Entity.Image = &Image;
+	PlayerEntity->Image = &Image;
+	
+	PopulateWorld(Entities, &EntityCount);
 	
 #if 0
 	PremultiplyAlpha(&Image);
@@ -816,41 +989,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	PremultiplyAlpha_4x(&Image);
 #endif
 	
-	float Vertices[] = 
-	{
-	   Entity.X + Entity.Width,  Entity.Y + Entity.Height, 1.0f, 1.0f,//Top right
-	   Entity.X,                 Entity.Y + Entity.Height, 0.0f, 1.0f,//Top left
-	   Entity.X,                 Entity.Y,                 0.0f, 0.0f,//Bottom left
-	   Entity.X + Entity.Width,  Entity.Y,                 1.0f, 0.0f,//Bottom right
-
-	};
-	int VerticesSize = sizeof(Vertices);
-	
-	entity Entity2 = {};
-	Entity2.X = 500;
-	Entity2.Y = 150;
-	Entity2.Width = 640 - 2*150;
-	Entity2.Height = 480 - 2*150;
-	
-	float Vertices2[] = 
-	{
-	   Entity2.X + Entity2.Width,  Entity2.Y + Entity2.Height, 1.0f, 1.0f,//Top right
-	   Entity2.X,                 Entity2.Y + Entity2.Height, 0.0f, 1.0f,//Top left
-	   Entity2.X,                 Entity2.Y,                 0.0f, 0.0f,//Bottom left
-	   Entity2.X + Entity2.Width,  Entity2.Y,                 1.0f, 0.0f,//Bottom right
-
-	};
-	int VerticesSize2 = sizeof(Vertices);
-	
-	glGenTextures(1, &Entity.Image->TextureID);
-	glBindTexture(GL_TEXTURE_2D, Entity.Image->TextureID);
+	glGenTextures(1, &PlayerEntity->Image->TextureID);
+	glBindTexture(GL_TEXTURE_2D, PlayerEntity->Image->TextureID);
 	
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, Entity.Image->Width, Entity.Image->Height, 0, Entity.Image->Format, GL_UNSIGNED_BYTE, Entity.Image->Data);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PlayerEntity->Image->Width, PlayerEntity->Image->Height, 0, PlayerEntity->Image->Format, GL_UNSIGNED_BYTE, PlayerEntity->Image->Data);
 	glGenerateMipmap(GL_TEXTURE_2D);
 	//GLuint TexLoc = glGetUniformLocation(ShaderProgram, "BrickTexture");
 	
@@ -858,7 +1005,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // For premultiplied alpha
 	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	
-	camera Camera = {0, 0, 640, 480};
+	float CameraWidth = 640 * 1.5f;
+	float CameraHeight = 480 * 1.5f;
+	
+	float HalfW = CameraWidth / 2.0f;
+	float HalfH = CameraHeight / 2.0f;
+	
+	float CenterCameraX = PlayerEntity->X + PlayerEntity->Width / 2.0f;
+	float CenterCameraY = PlayerEntity->Y + PlayerEntity->Height / 2.0f;
+	
+	
+	camera Camera = {CenterCameraX - HalfW, CenterCameraY - HalfH, CameraWidth, CameraHeight};
 		
 	float ProjMatrix[16];
 	OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
@@ -897,7 +1054,177 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		
 		GetInputStandard(&Input);
 		
-		UpdateGameState(&Input, &Entity, &Camera, Vertices);
+		float DX = 0.0f;
+		float DY = 0.0f;
+		
+		bool Right = Input.WasDown[VK_RIGHT];
+		bool Left = Input.WasDown[VK_LEFT];
+		bool Up = Input.WasDown[VK_UP];
+		bool Down = Input.WasDown[VK_DOWN];
+		
+		float Speed = 4.0f;
+		if(Right) DX = 1.0f;
+		if(Left) DX = -1.0f;
+		if(Up) DY = 1.0f;
+		if(Down) DY = -1.0f;
+		
+
+		float Magnitude = sqrtf(DX * DX + DY * DY);
+		if(Magnitude > 0.0f)
+		{
+			DX /= Magnitude;
+			DY /= Magnitude;
+		}
+		
+		entity* CollideEntity = PlayerEntity;
+		int CollideEntityIndex = PlayerEntityIndex;
+		
+		CollideEntity->X += DX * Speed;
+		Camera.X += DX * Speed;
+		
+		CollideEntity->Y += DY * Speed;
+		Camera.Y += DY * Speed;
+		
+		int CollisionsX = 0;
+		float MinAmount = 0;
+		int MinWall = 0;
+		const float Epsilon = 10.0f;
+		for(int EntityIndex = 0; EntityIndex < EntityCount; EntityIndex++)
+		{
+			entity* TestEntity = &Entities[EntityIndex];
+			if(EntityIndex != CollideEntityIndex)
+			{
+				bool Collided = CollisionCheckPair(CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
+				
+				if(Collided && CollisionsX)
+				{
+					CollisionsX++;
+					
+					switch(MinWall)
+					{
+						case 0: 
+							CollideEntity->X -= -MinAmount - Epsilon;
+							Camera.X -= -MinAmount - Epsilon;
+							
+						break;
+						case 1: 
+							CollideEntity->X -= MinAmount + Epsilon;
+							Camera.X -= MinAmount + Epsilon;
+						break;
+					}
+					
+					break;
+				}
+				
+				if(Collided)
+				{
+					entity* HitEntity = TestEntity;
+					float OverlapAmountsX[2] = 
+					{  
+						(CollideEntity->X + CollideEntity->Width) - HitEntity->X,  //Left
+						(HitEntity->X + HitEntity->Width) - CollideEntity->X,     //Right
+					};
+							
+					MinAmount = OverlapAmountsX[0];
+					MinWall = 0;
+					for(int Wall = 1; Wall < 2; Wall++)
+					{
+						float OverlapAmount = OverlapAmountsX[Wall];
+						if(OverlapAmount < MinAmount)
+						{
+							MinAmount = OverlapAmount;
+							MinWall = Wall;
+						}
+					}
+
+					
+					switch(MinWall)
+					{
+						case 0: 
+							CollideEntity->X += -MinAmount - Epsilon;
+							Camera.X += -MinAmount - Epsilon;
+						break;
+						case 1: 
+							CollideEntity->X += MinAmount + Epsilon; 
+							Camera.X += MinAmount + Epsilon; 
+						break;
+					}
+					
+					CollisionsX++;
+				}
+				
+			}
+		}
+		
+		int CollisionsY = 0;
+		MinAmount = 0;
+		MinWall = 0;
+		for(int EntityIndex = 0; EntityIndex < EntityCount; EntityIndex++)
+		{
+			entity* TestEntity = &Entities[EntityIndex];
+			if(EntityIndex != CollideEntityIndex)
+			{
+				bool Collided = CollisionCheckPair(CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
+				
+				if(Collided && CollisionsY)
+				{
+					CollisionsY++;
+					
+					switch(MinWall)
+					{
+						case 0: 
+							CollideEntity->Y -= -MinAmount - Epsilon; 
+							Camera.Y -= -MinAmount - Epsilon; 
+						break;
+						case 1: 
+							CollideEntity->Y -= MinAmount + Epsilon;
+							Camera.Y -= MinAmount + Epsilon;
+						break;
+					}
+					
+					break;
+				}
+				
+				if(Collided)
+				{
+					entity* HitEntity = TestEntity;
+					float OverlapAmountsY[2] = 
+					{  
+						(CollideEntity->Y + CollideEntity->Height) - HitEntity->Y, //Bottom
+						(HitEntity->Y + HitEntity->Height) - CollideEntity->Y,    //Top
+					};
+							
+					MinAmount = OverlapAmountsY[0];
+					MinWall = 0;
+					for(int Wall = 1; Wall < 2; Wall++)
+					{
+						float OverlapAmount = OverlapAmountsY[Wall];
+						if(OverlapAmount < MinAmount)
+						{
+							MinAmount = OverlapAmount;
+							MinWall = Wall;
+						}
+					}
+
+					
+					switch(MinWall)
+					{
+						case 0: 
+							CollideEntity->Y += -MinAmount - Epsilon; 
+							Camera.Y += -MinAmount - Epsilon; 
+						break;
+						case 1: 
+							CollideEntity->Y += MinAmount + Epsilon;
+							Camera.Y += MinAmount + Epsilon;
+						break;
+					}
+					
+					CollisionsY++;
+				}
+				
+			}
+		}
+		
 		
 		OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
 		
@@ -919,11 +1246,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		//glDrawArrays(GL_TRIANGLES, 0, 6);
 		
 		glBindBuffer(GL_ARRAY_BUFFER, VBO);
-		glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
-		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-		
-		glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize2, Vertices2);
-		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+		for(int EntityIndex = 0; EntityIndex < EntityCount; EntityIndex++)
+		{
+			entity CurrEntity = Entities[EntityIndex];
+			float Vertices[] = 
+			{
+			   CurrEntity.X + CurrEntity.Width,  CurrEntity.Y + CurrEntity.Height, 1.0f, 1.0f,//Top right
+			   CurrEntity.X,                 	 CurrEntity.Y + CurrEntity.Height, 0.0f, 1.0f,//Top left
+			   CurrEntity.X,                     CurrEntity.Y,                     0.0f, 0.0f,//Bottom left
+			   CurrEntity.X + CurrEntity.Width,  CurrEntity.Y,                     1.0f, 0.0f,//Bottom right
+
+			};
+			int VerticesSize = sizeof(Vertices);
+			
+			glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
+			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+			
+			glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
+			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+		}
 		
 		SwapBuffers(WindowDC);
 		
@@ -966,18 +1307,9 @@ R"(
 	#version 330 core
 	
 	out vec4 FragColour;
-	in vec2 TexCoord;
-	uniform sampler2D BrickTexture;
 	uniform vec4 Colour;
 	void main()
 	{
-		float AlphaScale = 0.2f;
-		//FragColour = vec4(TexCoord, 0.0f, 1.0f);
-		//FragColour = texture(BrickTexture, TexCoord);
 		FragColour = Colour;
-		//Premultiply for a test
-		//FragColour *= AlphaScale;
-		//FragColour.a = AlphaScale;
-		//FragColour = vec4(0.2f, 0.0f, 0.0f, 0.2f);
 	}
 )";
