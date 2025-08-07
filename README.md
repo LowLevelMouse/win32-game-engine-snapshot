@@ -1,7 +1,4 @@
-# win32-demo
-
-Minimal Win32 API demo written in C — no libraries or frameworks.  
-**Note**: This is a public snapshot of my private game engine repository.
+# Game Engine for Windows
 
 ---
 
@@ -25,3 +22,7 @@ Run the `build.bat` file in the project root, then execute `win32.exe`.
   - Runtime shader compilation with error checking  
   - Pre-multiplied alpha blending  
   - Nearest-neighbor texture filtering
+- Polling user input using `GetAsyncKeyState`
+- AABB collision detection with one pass per axis
+- Minimal entity system
+- Seperation between platform and game code for cross platform integration
