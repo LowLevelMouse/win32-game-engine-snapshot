@@ -17,7 +17,7 @@ Run the `build.bat` file in the project root, then execute `win32.exe`.
   **Note**: Audio is muted by default. To enable it, remove the `#if` guard on `SourceVoice->Start();` or add `/DAUDIO_PLAYING` to the build batch file.
 - File I/O system  
   - Currently writes `"hello!"` to a test file as a demonstration
-- Initializes OpenGL on Windows and renders a brick texture with transparency  
+- Initializes OpenGL on Windows
   - VAO, VBO, and EBO setup  
   - Runtime shader compilation with error checking  
   - Pre-multiplied alpha blending  
@@ -25,4 +25,4 @@ Run the `build.bat` file in the project root, then execute `win32.exe`.
 - Polling user input using `GetAsyncKeyState`
 - AABB collision detection with one pass per axis
 - Minimal entity system
-- Seperation between platform and game code for cross platform integration
+- Seperation between platform and game code for future cross platform integration
