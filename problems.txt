@@ -30,4 +30,7 @@ We have a grid of rectangles which the distance between are too big for the play
 Player Rectangle can get "stuck" right on a corner when grinding because it's redirecting the wrong axis, 
 putting an infinite loop of user pushes in, collision pushes the wrong axis back out, so you freeze and cant make any progress. Example grinding from below pushing up and left, freezes on a corner in the "left" rectangle if we
 are grinding into two rectanlges from the bottom. The left rectangle in this case is also earlier in the entity list
-which may also be causing the issue.
+which may also be causing the issue, if it collided with the right rectangle first it would work fine but that may 
+be too uncertain.
+
+Resolving one axis at a time solves this issue

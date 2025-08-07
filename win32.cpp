@@ -1,19 +1,14 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdint.h>
 #include <stdlib.h> //Contains exit macros
 #include <xaudio2.h>
-#include <math.h>
-#include <emmintrin.h>
 
 #include <glad/wgl.h>
-#include <glad/gl.h>
-
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
 
 #include "win32.h"
+
+void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram);
 
 extern "C" 
 {
@@ -23,9 +18,9 @@ extern "C"
     __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 }
 
-void InitalizeArena(memory_arena* Arena, size_t Size)
+void InitializeArena(memory_arena* Arena, size_t Size, uint8_t* Base)
 {
-	Arena->Base = (uint8_t*)VirtualAlloc(0, Size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	Arena->Base = Base;
 	Arena->Size = Size;
 	Arena->Used = 0;
 }
@@ -55,7 +50,6 @@ void* PushSizeAligned(memory_arena* Arena, size_t Size, size_t Alignment)
 	
 	return Result;
 }
-
 
 LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM LParam)
 {
@@ -294,151 +288,6 @@ void PrepFrame(GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float* Vertices,
 	glViewport(0, 0, 640, 480);
 }
 
-//Data should not have padding as far as I'm aware
-image LoadImage(const char* Filename)
-{
-	image Image = {};
-	int Channels;
-	int ChanneslsForce = 4;
-	stbi_set_flip_vertically_on_load(1);
-	unsigned char* Data = stbi_load(Filename, &Image.Width, &Image.Height, &Channels, ChanneslsForce);
-	if(Data)
-	{
-		Image.Data = Data;
-		Image.Filename = Filename;
-		Image.Format = GL_RGBA;
-		Image.Pitch = Image.Width * ChanneslsForce;
-	}
-	return Image;
-}
-
-float UInt255To1(uint32_t Value)
-{
-	float Result = Value / 255.0f;
-	return Result;
-}
-
-uint8_t RoundFloatToUInt8(float Value)
-{
-	uint8_t Result = (uint8_t)(Value + 0.5f);
-	return Result;
-}
-
-uint8_t MinUInt8(uint8_t A, uint8_t B)
-{
-	uint8_t Result = A;
-	if(A > B)
-	{
-		Result = B;
-	}
-	
-	return Result;
-}
-
-uint8_t MaxUint8(uint8_t A, uint8_t B)
-{
-	uint8_t Result = A;
-	if(A < B)
-	{
-		Result = B;
-	}
-	
-	return Result;
-}
-
-void PremultiplyAlpha(image* Image)
-{
-	uint8_t* Data = (uint8_t*)Image->Data;
-	for(int Y = 0; Y < Image->Height; Y++)
-	{
-		uint32_t* Row = (uint32_t*)Data;
-		for(int X = 0; X < Image->Width; X++)
-		{
-			uint32_t* Pixel = Row + X;
-			uint8_t R255 = (uint8_t)((*Pixel) >> 0);
-			uint8_t G255 = (uint8_t)((*Pixel) >> 8);
-			uint8_t B255 = (uint8_t)((*Pixel) >> 16);
-			uint8_t A255 = (uint8_t)((*Pixel) >> 24);
-			float A1 = UInt255To1(A255);
-			
-			R255 = MaxUint8(MinUInt8(RoundFloatToUInt8(R255 * A1), 255), 0);
-			G255 = MaxUint8(MinUInt8(RoundFloatToUInt8(G255 * A1), 255), 0);
-			B255 = MaxUint8(MinUInt8(RoundFloatToUInt8(B255 * A1), 255), 0);
-
-			uint32_t NewPixel = (A255 << 24) | (B255 << 16) | (G255 << 8) | (R255 << 0);
-			*Pixel = NewPixel;
-		}
-		
-		Data += Image->Pitch;
-	}
-	
-}
-
-void PremultiplyAlpha_4x(image* Image)
-{
-	__m128i I255_4x = _mm_set1_epi32(255);
-	__m128i I0_4x =  _mm_set1_epi32(0);
-	__m128i MaskFF = _mm_set1_epi32(0xFF);
-			
-	uint8_t* Data = (uint8_t*)Image->Data;
-	for(int Y = 0; Y < Image->Height; Y++)
-	{
-		uint32_t* Row = (uint32_t*)Data;
-		int X = 0;
-		for(; X <= Image->Width - 4; X+= 4)
-		{
-			uint32_t* Pixel = Row + X;
-			__m128i Pixel_4x = _mm_loadu_si128((__m128i*)Pixel);
-			
-			__m128i Red_4x = _mm_and_si128(Pixel_4x, MaskFF);
-			__m128i Green_4x = _mm_and_si128(_mm_srli_epi32(Pixel_4x, 8), MaskFF);
-			__m128i Blue_4x = _mm_and_si128(_mm_srli_epi32(Pixel_4x, 16), MaskFF);
-			__m128i Alpha_4x = _mm_and_si128(_mm_srli_epi32(Pixel_4x, 24), MaskFF);
-
-			__m128 A1_4x = _mm_mul_ps(_mm_cvtepi32_ps(Alpha_4x), _mm_set1_ps(1.0f / 255.0f));
-			
-			__m128 Red255_4x_Premultiply = _mm_mul_ps(_mm_cvtepi32_ps(Red_4x), A1_4x);
-			__m128i Red255_4x_Rounded = _mm_cvtps_epi32(Red255_4x_Premultiply);
-			__m128i Red255_4x_Clamped = _mm_max_epi32(_mm_min_epi32(Red255_4x_Rounded, I255_4x), I0_4x);
-			
-			__m128 Green255_4x_Premultiply = _mm_mul_ps(_mm_cvtepi32_ps(Green_4x), A1_4x);
-			__m128i Green255_4x_Rounded = _mm_cvtps_epi32(Green255_4x_Premultiply);
-			__m128i Green255_4x_Clamped = _mm_max_epi32(_mm_min_epi32(Green255_4x_Rounded, I255_4x), I0_4x);
-			__m128i Green255_4x_Shifted = _mm_slli_epi32(Green255_4x_Clamped, 8);
-			
-			__m128 Blue255_4x_Premultiply = _mm_mul_ps(_mm_cvtepi32_ps(Blue_4x), A1_4x);
-			__m128i Blue255_4x_Rounded = _mm_cvtps_epi32(Blue255_4x_Premultiply);
-			__m128i Blue255_4x_Clamped =_mm_max_epi32(_mm_min_epi32(Blue255_4x_Rounded, I255_4x), I0_4x);
-			__m128i Blue255_4x_Shifted = _mm_slli_epi32(Blue255_4x_Clamped, 16);
-			
-			__m128i Alpha255_4x_Shifted = _mm_slli_epi32(Alpha_4x, 24);
-			
-			__m128i Packed = _mm_or_si128(Alpha255_4x_Shifted, _mm_or_si128(Blue255_4x_Shifted, _mm_or_si128(Green255_4x_Shifted, Red255_4x_Clamped)));
-			_mm_storeu_si128((__m128i*)Pixel, Packed);
-
-		}
-		
-		for(; X < Image->Width; X++)
-		{
-			uint32_t* Pixel = Row + X;
-			uint8_t R255 = (uint8_t)((*Pixel) >> 0);
-			uint8_t G255 = (uint8_t)((*Pixel) >> 8);
-			uint8_t B255 = (uint8_t)((*Pixel) >> 16);
-			uint8_t A255 = (uint8_t)((*Pixel) >> 24);
-			float A1 = UInt255To1(A255);
-			
-			R255 = MaxUint8(MinUInt8(RoundFloatToUInt8(R255 * A1), 255), 0);
-			G255 = MaxUint8(MinUInt8(RoundFloatToUInt8(G255 * A1), 255), 0);
-			B255 = MaxUint8(MinUInt8(RoundFloatToUInt8(B255 * A1), 255), 0);
-
-			uint32_t NewPixel = (A255 << 24) | (B255 << 16) | (G255 << 8) | (R255 << 0);
-			*Pixel = NewPixel;
-		}
-
-		Data += Image->Pitch;
-	}
-	
-}
 
 IXAudio2* InitalizeXAudio2(HWND WindowHandle)
 {
@@ -624,51 +473,55 @@ int Win32ReadFile(const LPCWSTR Path)
 	
 }
 
-void OrthographicProjectionMatrix(float* ProjMatrix, float Left, float Bottom, float Right, float Top)
-{
-	float XScale = 2.0f / (Right - Left);
-	float YScale = 2.0f / (Top - Bottom);
-	float XTrans = -(Right + Left) / (float)(Right - Left);
-	float YTrans = -(Top + Bottom) / (float)(Top - Bottom);
-	
-	ProjMatrix[0] = XScale; ProjMatrix[4] = 0; 		 ProjMatrix[8] = 0;       ProjMatrix[12] = XTrans;
-	ProjMatrix[1] = 0; 		ProjMatrix[5] = YScale;  ProjMatrix[9] = 0;       ProjMatrix[13] = YTrans;
-	ProjMatrix[2] = 0; 		ProjMatrix[6] = 0; 		 ProjMatrix[10] = -1.0f;  ProjMatrix[14] = 0;
-	ProjMatrix[3] = 0; 		ProjMatrix[7] = 0; 		 ProjMatrix[11] = 0;      ProjMatrix[15] = 1.0f;
-						  
-}
 
-void PollInput(input* Input)
+void PollInput(win32_input* Win32Input)
 {
 	for(int Key = 0; Key < VK_CODE_MAX; Key++)
 	{
 		bool IsDown = (GetAsyncKeyState(Key) & 0x8000) != 0;
-		Input->IsDown[Key] = IsDown;
+		Win32Input->IsDown[Key] = IsDown;
 	}
 }
 
-void UpdateInputState(input* Input)
+void MapWin32InputToGame(input* Input, win32_input* Win32Input)
 {
-	for(int Key = 0; Key < VK_CODE_MAX; Key++)
+	/* enum buttons
 	{
-		Input->Pressed[Key] = (Input->IsDown[Key] && !Input->WasDown[Key]);
-		Input->Released[Key] = (!Input->IsDown[Key] && Input->WasDown[Key]);
+		Button_Up,
+		Button_Down,
+		Button_Left,
+		Button_Right,
+	};
+	*/
+	const int KeyMap[Button_Count] = 
+	{
+		VK_UP,
+		VK_DOWN,
+		VK_LEFT,
+		VK_RIGHT,
+	};
+	
+	for(int Button = 0; Button < Button_Count; Button++)
+	{
+		Input->IsDown[Button] = Win32Input->IsDown[KeyMap[Button]]; 
 	}
 }
+
 void StoreInputState(input* Input)
 {
-	for(int Key = 0; Key < VK_CODE_MAX; Key++)
+	for(int Button = 0; Button < Button_Count; Button++)
 	{	
-		Input->WasDown[Key] = Input->IsDown[Key];
+		Input->WasDown[Button] = Input->IsDown[Button];
 	}
 }
 
+#if 0
 void GetInputStandard(input* Input)
 {
 	PollInput(Input);
-	UpdateInputState(Input);
 	StoreInputState(Input);
 }
+#endif
 
 //This needs to be more descriptive and potentially take in dynamic paramaters so we can account for a different layout
 void SetQuadVertices(float* Vertices, float X, float Y, float Width, float Height)
@@ -686,199 +539,28 @@ void SetQuadVertices(float* Vertices, float X, float Y, float Width, float Heigh
 	Vertices[13] = Y;
 }
 
-void UpdateGameState(input* Input, entity* Entity, camera* Camera)
-{	
-	float DX = 0.0f;
-	float DY = 0.0f;
-	
-	bool Right = Input->WasDown[VK_RIGHT];
-	bool Left = Input->WasDown[VK_LEFT];
-	bool Up = Input->WasDown[VK_UP];
-	bool Down = Input->WasDown[VK_DOWN];
-	
-	float Speed = 4.0f;
-	if(Right) DX = 1.0f;
-	if(Left) DX = -1.0f;
-	if(Up) DY = 1.0f;
-	if(Down) DY = -1.0f;
-	
 
-	float Magnitude = sqrtf(DX * DX + DY * DY);
-	if(Magnitude > 0.0f)
+
+memory InitializeMemory()
+{
+	memory Memory = {};
+	
+	uint64_t TotalMemorySize = Megabytes(500);
+	uint64_t PermanentMemorySize = Megabytes(250);
+	uint64_t TemporaryMemorySize = TotalMemorySize - PermanentMemorySize;
+	Assert(PermanentMemorySize + TemporaryMemorySize <= TotalMemorySize);
+	
+	uint8_t* Base = (uint8_t*)VirtualAlloc(0, TotalMemorySize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	if(Base)
 	{
-		DX /= Magnitude;
-		DY /= Magnitude;
+		InitializeArena(&Memory.PermanentMemory, PermanentMemorySize, Base);
+		InitializeArena(&Memory.TemporaryMemory, TemporaryMemorySize, Base + PermanentMemorySize);
 		
-		Entity->X += DX * Speed;
-		Entity->Y += DY * Speed;
-		Camera->X += DX * Speed;
-		Camera->Y += DY * Speed;
-		
-		//SetQuadVertices(Vertices, Entity->X, Entity->Y, Entity->Width, Entity->Height);
-	}
-}
-
-collision StandardCollision(entity Entity)
-{
-	collision Collision = {};
-	
-	Collision.X = Entity.X;
-	Collision.Y = Entity.Y;
-	Collision.Width = Entity.Width;
-	Collision.Height = Entity.Height;
-	
-	return Collision;
-}
-
-int AddEntity(entity* Entities, int* EntityCount, float X, float Y, float Width, float Height)
-{
-	int EntityIndex = *EntityCount;
-	
-	entity Entity = {};
-	Entity.X = X;
-	Entity.Y = Y;
-	Entity.Width = Width;
-	Entity.Height = Height;
-	Entity.Collision = StandardCollision(Entity);
-	
-	Entities[(*EntityCount)++] = Entity;
-	
-	return EntityIndex;
-}
-
-void PopulateWorld(entity* Entities, int* EntityCount)
-{
-	float Width = 400;
-	float Height = 200;
-	float PadX = 300;
-	float PadY = 150;
-	
-	float XStart =  Width + 100;
-	float X = XStart;
-	float Y = 0;
-	
-	for(int EntityY = 0; EntityY < 10; EntityY++)
-	{
-		X = XStart;
-		for(int EntityX = 0; EntityX < 10; EntityX++)
-		{
-			AddEntity(Entities, EntityCount, X, Y, Width, Height);
-			
-			X+= Width + PadX;
-		}
-		
-		Y+= Height + PadY;
-	}
-}
-
-bool CollisionCheckPair(float AX, float AY, float AWidth, float AHeight,
-					float BX, float BY, float BWidth, float BHeight)
-{
-	const float Epsilon = 10.0f;
-	bool Collided = false;
-	//Pos + Dim will be 1 greater than the pos so we use strictly < or > no >= or <= since that would be overlapping
-	if( (AX < BX + BWidth + Epsilon) && (AX + AWidth > BX - Epsilon) && (AY < BY + BHeight + Epsilon) && (AY + AHeight > BY - Epsilon) )
-	{
-		Collided = true;
+		Memory.IsInit = true;
 	}
 	
-	return Collided;
+	return Memory;
 }
-
-void ApplyCollisionCorrection(v2 NewPosition, entity* CollideEntity, camera* Camera)
-{
-	CollideEntity->X += NewPosition.X;
-	CollideEntity->Y += NewPosition.Y;
-	
-	Camera->X += NewPosition.X;
-	Camera->Y += NewPosition.Y;
-}
-
-v2 CollisionCorrectionTest(entity* CollideEntity, entity* HitEntity)
-{
-	
-	float OverlapAmounts[4] = 
-	{  
-		(CollideEntity->X + CollideEntity->Width) - HitEntity->X,  //Left
-		(HitEntity->X + HitEntity->Width) - CollideEntity->X,     //Right
-		(CollideEntity->Y + CollideEntity->Height) - HitEntity->Y, //Bottom
-		(HitEntity->Y + HitEntity->Height) - CollideEntity->Y,    //Top
-	};
-			
-	float MinAmount = OverlapAmounts[0];
-	int MinWall = 0;
-	for(int Wall = 1; Wall < 4; Wall++)
-	{
-		float OverlapAmount = OverlapAmounts[Wall];
-		if(OverlapAmount < MinAmount)
-		{
-			MinAmount = OverlapAmount;
-			MinWall = Wall;
-		}
-	}
-	
-	v2 NewPosition = {};
-
-	const float Epsilon = 10.0f;
-	
-	switch(MinWall)
-	{
-		case 0: 
-			NewPosition.X = -MinAmount - Epsilon; 
-		break;
-		case 1: 
-			NewPosition.X = MinAmount + Epsilon; 
-		break;
-		case 2: 
-			NewPosition.Y = -MinAmount - Epsilon; 
-		break;
-		case 3: 
-			NewPosition.Y = MinAmount + Epsilon; 
-		break;
-	}
-	
-	return NewPosition;
-}
-
-entity* CollisionCheckGlobal(entity* Entities, int EntityCount, entity* CollideEntity, int CollideEntityIndex, camera* Camera)
-{
-	int Count = 0;
-	entity* HitEntity = 0;
-	for(int EntityIndex = 0; EntityIndex < EntityCount; EntityIndex++)
-	{
-		if(EntityIndex != CollideEntityIndex)
-		{
-			entity* TestEntity = &Entities[EntityIndex];
-			bool Collided = CollisionCheckPair(CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
-			if(Collided)
-			{
-				Count ++;
-				if(Count == 2)
-				{
-					int X = 5;
-				}
-				
-				HitEntity = TestEntity;
-				v2 NewPosition = CollisionCorrectionTest(CollideEntity, HitEntity);
-				//ApplyCollisionCorrection(NewPosition, CollideEntity, Camera);
-				
-				#if 1
-				Collided = CollisionCheckPair(NewPosition.X, NewPosition.Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
-				if(!Collided)
-				{
-					HitEntity = TestEntity;
-					ApplyCollisionCorrection(NewPosition, CollideEntity, Camera);
-				}
-				#endif
-			}
-		}
-		
-	}
-	
-	return HitEntity;
-}
-
-
 ///
 //NEED TO MAKE TIMING ROBUST!!!
 ///
@@ -888,16 +570,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	(void)lpCmdLine;
 	(void)nCmdShow;
 	
-	memory_arena MemoryArena = {};
-	InitalizeArena(&MemoryArena, Megabytes(500));
+	memory Memory = InitializeMemory();
+	if(!Memory.IsInit)
+	{
+		return EXIT_FAILURE;
+	}
 
-	//Step 1 Window Initialization
+	//Window Initialization
 	HWND WindowHandle = WindowInitialization(hInstance);
 	if(!WindowHandle)
 	{
 		return EXIT_FAILURE;
 	}
-	//Step 2 Init OpenGL
+	//Init OpenGL
 	HDC WindowDC = GetDC(WindowHandle);
 	HGLRC NewGLContext = InitializeOpenGL(WindowDC);
 	if(!NewGLContext)
@@ -905,7 +590,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		return EXIT_FAILURE;
 	}
 	
-	//Step 3 Initalize XAudio2 and fill a buffer
+	//Initalize XAudio2 and fill a buffer
 	IXAudio2* XAudio2 = InitalizeXAudio2(WindowHandle);
 	if(!XAudio2)
 	{
@@ -922,7 +607,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	
 	XAudio2Buffer.Seconds = 1;
 	XAudio2Buffer.SampleCount = 48000;
-	XAudio2Buffer.Samples = PushSizeAligned(&MemoryArena, sizeof(int16_t) * 2 * XAudio2Buffer.SampleCount * XAudio2Buffer.Seconds, 16);
+	XAudio2Buffer.Samples = PushSizeAligned(&Memory.PermanentMemory, sizeof(int16_t) * 2 * XAudio2Buffer.SampleCount * XAudio2Buffer.Seconds, 16);
 	XAudio2Buffer.Frequency = 320.0f;
 	XAudio2Buffer.Volume = 2500;
 	XAudio2Buffer.Theta = 0;
@@ -965,78 +650,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	int DummyVerticesSize = sizeof(DummyVerticies);
 	PrepFrame(&VAO, &VBO, &ShaderProgram, DummyVerticies, DummyVerticesSize);
 	
-	
-	entity Entities[ENTITY_MAX];
-	int EntityCount = 0;
-	
-	int PlayerEntityIndex = AddEntity(Entities, &EntityCount, 0, 0, 640 - 2*150, 480 - 2*150); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
-	entity* PlayerEntity = &Entities[PlayerEntityIndex];
-	
-	image Image = LoadImage("brick_test.png");
-	if(!Image.Data)
-	{
-		Dialog("Could not load image");
-		return EXIT_FAILURE;
-	}
-	
-	PlayerEntity->Image = &Image;
-	
-	PopulateWorld(Entities, &EntityCount);
-	
-#if 0
-	PremultiplyAlpha(&Image);
-#else
-	PremultiplyAlpha_4x(&Image);
-#endif
-	
-	glGenTextures(1, &PlayerEntity->Image->TextureID);
-	glBindTexture(GL_TEXTURE_2D, PlayerEntity->Image->TextureID);
-	
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, PlayerEntity->Image->Width, PlayerEntity->Image->Height, 0, PlayerEntity->Image->Format, GL_UNSIGNED_BYTE, PlayerEntity->Image->Data);
-	glGenerateMipmap(GL_TEXTURE_2D);
-	//GLuint TexLoc = glGetUniformLocation(ShaderProgram, "BrickTexture");
-	
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // For premultiplied alpha
-	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	
-	float CameraWidth = 640 * 1.5f;
-	float CameraHeight = 480 * 1.5f;
-	
-	float HalfW = CameraWidth / 2.0f;
-	float HalfH = CameraHeight / 2.0f;
-	
-	float CenterCameraX = PlayerEntity->X + PlayerEntity->Width / 2.0f;
-	float CenterCameraY = PlayerEntity->Y + PlayerEntity->Height / 2.0f;
-	
-	
-	camera Camera = {CenterCameraX - HalfW, CenterCameraY - HalfH, CameraWidth, CameraHeight};
-		
-	float ProjMatrix[16];
-	OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
-	GLuint ProjLoc = glGetUniformLocation(ShaderProgram, "ProjMatrix");
-	GLuint BrickLoc = glGetUniformLocation(ShaderProgram, "BrickTexture");
-	GLuint ColourPos = glGetUniformLocation(ShaderProgram, "Colour");
-	
-	input Input = {};
-	
 	//Make the window visible and force a repaint
 	ShowWindow(WindowHandle, nCmdShow);
 	UpdateWindow(WindowHandle);
 	
-	LARGE_INTEGER PerfFreq;
+	LARGE_INTEGER PerfFreq = {};
 	QueryPerformanceFrequency(&PerfFreq);
 	
-	LARGE_INTEGER LastCounter;
+	double SecondsPerTick = 1.0 / (double)PerfFreq.QuadPart;
+	
+	win32_input Win32Input = {};
+	input Input = {};
+	LARGE_INTEGER LastCounter = {};
 	QueryPerformanceCounter(&LastCounter);
 	
-	LARGE_INTEGER CurrentCounter;
-	double SecondsPerTick = 1.0 / (double)PerfFreq.QuadPart;
 	
 	bool Running = true;
 	MSG Msg = {};
@@ -1049,232 +676,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			DispatchMessage(&Msg);
 		}
 		
-		//We are skipping the time spent processing messages
-		QueryPerformanceCounter(&CurrentCounter);
+		PollInput(&Win32Input);
+		MapWin32InputToGame(&Input, &Win32Input);
 		
-		GetInputStandard(&Input);
+		UpdateAndRender(&Memory, &Input, &VAO, &VBO, &ShaderProgram);
 		
-		float DX = 0.0f;
-		float DY = 0.0f;
-		
-		bool Right = Input.WasDown[VK_RIGHT];
-		bool Left = Input.WasDown[VK_LEFT];
-		bool Up = Input.WasDown[VK_UP];
-		bool Down = Input.WasDown[VK_DOWN];
-		
-		float Speed = 4.0f;
-		if(Right) DX = 1.0f;
-		if(Left) DX = -1.0f;
-		if(Up) DY = 1.0f;
-		if(Down) DY = -1.0f;
-		
-
-		float Magnitude = sqrtf(DX * DX + DY * DY);
-		if(Magnitude > 0.0f)
-		{
-			DX /= Magnitude;
-			DY /= Magnitude;
-		}
-		
-		entity* CollideEntity = PlayerEntity;
-		int CollideEntityIndex = PlayerEntityIndex;
-		
-		CollideEntity->X += DX * Speed;
-		Camera.X += DX * Speed;
-		
-		CollideEntity->Y += DY * Speed;
-		Camera.Y += DY * Speed;
-		
-		int CollisionsX = 0;
-		float MinAmount = 0;
-		int MinWall = 0;
-		const float Epsilon = 10.0f;
-		for(int EntityIndex = 0; EntityIndex < EntityCount; EntityIndex++)
-		{
-			entity* TestEntity = &Entities[EntityIndex];
-			if(EntityIndex != CollideEntityIndex)
-			{
-				bool Collided = CollisionCheckPair(CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
-				
-				if(Collided && CollisionsX)
-				{
-					CollisionsX++;
-					
-					switch(MinWall)
-					{
-						case 0: 
-							CollideEntity->X -= -MinAmount - Epsilon;
-							Camera.X -= -MinAmount - Epsilon;
-							
-						break;
-						case 1: 
-							CollideEntity->X -= MinAmount + Epsilon;
-							Camera.X -= MinAmount + Epsilon;
-						break;
-					}
-					
-					break;
-				}
-				
-				if(Collided)
-				{
-					entity* HitEntity = TestEntity;
-					float OverlapAmountsX[2] = 
-					{  
-						(CollideEntity->X + CollideEntity->Width) - HitEntity->X,  //Left
-						(HitEntity->X + HitEntity->Width) - CollideEntity->X,     //Right
-					};
-							
-					MinAmount = OverlapAmountsX[0];
-					MinWall = 0;
-					for(int Wall = 1; Wall < 2; Wall++)
-					{
-						float OverlapAmount = OverlapAmountsX[Wall];
-						if(OverlapAmount < MinAmount)
-						{
-							MinAmount = OverlapAmount;
-							MinWall = Wall;
-						}
-					}
-
-					
-					switch(MinWall)
-					{
-						case 0: 
-							CollideEntity->X += -MinAmount - Epsilon;
-							Camera.X += -MinAmount - Epsilon;
-						break;
-						case 1: 
-							CollideEntity->X += MinAmount + Epsilon; 
-							Camera.X += MinAmount + Epsilon; 
-						break;
-					}
-					
-					CollisionsX++;
-				}
-				
-			}
-		}
-		
-		int CollisionsY = 0;
-		MinAmount = 0;
-		MinWall = 0;
-		for(int EntityIndex = 0; EntityIndex < EntityCount; EntityIndex++)
-		{
-			entity* TestEntity = &Entities[EntityIndex];
-			if(EntityIndex != CollideEntityIndex)
-			{
-				bool Collided = CollisionCheckPair(CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
-				
-				if(Collided && CollisionsY)
-				{
-					CollisionsY++;
-					
-					switch(MinWall)
-					{
-						case 0: 
-							CollideEntity->Y -= -MinAmount - Epsilon; 
-							Camera.Y -= -MinAmount - Epsilon; 
-						break;
-						case 1: 
-							CollideEntity->Y -= MinAmount + Epsilon;
-							Camera.Y -= MinAmount + Epsilon;
-						break;
-					}
-					
-					break;
-				}
-				
-				if(Collided)
-				{
-					entity* HitEntity = TestEntity;
-					float OverlapAmountsY[2] = 
-					{  
-						(CollideEntity->Y + CollideEntity->Height) - HitEntity->Y, //Bottom
-						(HitEntity->Y + HitEntity->Height) - CollideEntity->Y,    //Top
-					};
-							
-					MinAmount = OverlapAmountsY[0];
-					MinWall = 0;
-					for(int Wall = 1; Wall < 2; Wall++)
-					{
-						float OverlapAmount = OverlapAmountsY[Wall];
-						if(OverlapAmount < MinAmount)
-						{
-							MinAmount = OverlapAmount;
-							MinWall = Wall;
-						}
-					}
-
-					
-					switch(MinWall)
-					{
-						case 0: 
-							CollideEntity->Y += -MinAmount - Epsilon; 
-							Camera.Y += -MinAmount - Epsilon; 
-						break;
-						case 1: 
-							CollideEntity->Y += MinAmount + Epsilon;
-							Camera.Y += MinAmount + Epsilon;
-						break;
-					}
-					
-					CollisionsY++;
-				}
-				
-			}
-		}
-		
-		
-		OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
-		
-		float Alpha = 1.0f;
-		glClearColor(0.2f * Alpha, 0.3f * Alpha, 0.3f * Alpha, Alpha);
-		glClear(GL_COLOR_BUFFER_BIT);
-		
-		glUseProgram(ShaderProgram);
-		
-		float FloatTestAlpha = 0.5f;
-		glUniform4f(ColourPos, 1.0f * FloatTestAlpha, 0, 0, FloatTestAlpha);
-		glUniformMatrix4fv(ProjLoc, 1, GL_FALSE, ProjMatrix);
-		glUniform1i(BrickLoc, 0);
-		
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, Image.TextureID);
-		
-		glBindVertexArray(VAO);
-		//glDrawArrays(GL_TRIANGLES, 0, 6);
-		
-		glBindBuffer(GL_ARRAY_BUFFER, VBO);
-		for(int EntityIndex = 0; EntityIndex < EntityCount; EntityIndex++)
-		{
-			entity CurrEntity = Entities[EntityIndex];
-			float Vertices[] = 
-			{
-			   CurrEntity.X + CurrEntity.Width,  CurrEntity.Y + CurrEntity.Height, 1.0f, 1.0f,//Top right
-			   CurrEntity.X,                 	 CurrEntity.Y + CurrEntity.Height, 0.0f, 1.0f,//Top left
-			   CurrEntity.X,                     CurrEntity.Y,                     0.0f, 0.0f,//Bottom left
-			   CurrEntity.X + CurrEntity.Width,  CurrEntity.Y,                     1.0f, 0.0f,//Bottom right
-
-			};
-			int VerticesSize = sizeof(Vertices);
-			
-			glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
-			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-			
-			glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
-			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-		}
+		StoreInputState(&Input);
 		
 		SwapBuffers(WindowDC);
-		
+	
+		//We are skipping the time spent processing messages
+		LARGE_INTEGER CurrentCounter = {};
+		QueryPerformanceCounter(&CurrentCounter);
+
 		double SecondsElapsed = (double)(CurrentCounter.QuadPart - LastCounter.QuadPart) * SecondsPerTick;
 		LastCounter = CurrentCounter;
 		
 		char Buffer[256];
 		_snprintf_s(Buffer, sizeof(Buffer), _TRUNCATE, "Frame Time %.4f s (%.1f FPS)\n", SecondsElapsed, 1.0 / SecondsElapsed);
 		OutputDebugStringA(Buffer);
-		
 	}
 	
 	//Cleanup
@@ -1313,3 +733,4 @@ R"(
 		FragColour = Colour;
 	}
 )";
+

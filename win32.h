@@ -1,6 +1,14 @@
 #ifndef ENGINE_WIN32_H
 #define ENGINE_WIN32_H
 
+
+#include <stdint.h>
+#include <glad/gl.h>
+#include <emmintrin.h>
+#include <math.h>
+
+#include "shared.h"
+
 //do-while is to make this works with edge cases like within and if before an else
 //where it binds the macros if to the else instead of the initial if you wanted
 //turns multiple statements into one
@@ -24,7 +32,6 @@
 		}\
 	}while(0) \
 
-#define Assert(Expression) do { if (!(Expression)) { *(volatile int*)0 = 0; } } while(0)
 #define Check(Expression) do { if(!(Expression)) {return -1;} } while(0)
 
 	
@@ -35,25 +42,21 @@
 #define Gigabytes(Value) ((Value) * 1024ULL * 1024ULL * 1024ULL)
 #define Terabytes(Value) ((Value) * 1024ULL * 1024ULL * 1024ULL * 1024ULL)
 
-#define PushStruct(Arena, type) (type*)PushSize(Arena, sizeof(type))
-#define PushArray(Arena, type, Count) (type*)PushSize(Arena, sizeof(type)*(Count))
-#define PushStruct16(Arena, type) (type*)PushSizeAligned(Arena, sizeof(type), 16)
-#define PushArray16(Arena, type, Count) (type*)PushSizeAligned(Arena, sizeof(type)*(Count), 16)
-
-#define AlignPow2(Value, Alignment) ( ( (Value) + ((Alignment) - 1) ) & ~((Alignment) - 1) ) 
-
 #define ARGB32(A, R, G, B) (uint32_t)( (A << 24) | (R << 16) | (G << 8) | B )
 
 #define VK_CODE_MAX 256
 
-#define ENTITY_MAX 1000
 
-struct memory_arena
-{
-	size_t Size;
-	size_t Used;
-	uint8_t* Base;
-};
+#define AlignPow2(Value, Alignment) ( ( (Value) + ((Alignment) - 1) ) & ~((Alignment) - 1) )
+
+
+
+
+#define PushStruct(Arena, type) (type*)PushSize(Arena, sizeof(type))
+#define PushArray(Arena, type, Count) (type*)PushSize(Arena, sizeof(type)*(Count))
+#define PushStruct16(Arena, type) (type*)PushSizeAligned(Arena, sizeof(type), 16)
+#define PushArray16(Arena, type, Count) (type*)PushSizeAligned(Arena, sizeof(type)*(Count), 16) 
+
 
 struct xaudio2
 {
@@ -75,52 +78,7 @@ struct xaudio2_buffer
 	float DeltaTheta;
 };
 
-struct image
-{
-	GLuint TextureID;
-	int Width;
-	int Height;
-	int Pitch;
-	int Format;
-	void* Data;
-	const char* Filename;
-};
 
-struct collision
-{
-	float X, Y; //Left Bottom
-	float Width, Height;
-};
-
-struct entity
-{
-	image* Image;
-	float X, Y;
-	float Width, Height;
-	float ScaleX, ScaleY;
-	float Theta;
-	collision Collision;
-};
-
-struct input
-{
-	bool IsDown[256];
-	bool WasDown[256];
-	bool Pressed[256];
-	bool Released[256];	
-};
-
-struct camera
-{
-	float X, Y; //Left Bottom
-	float Width, Height;
-};
-
-struct v2
-{
-	float X;
-	float Y;
-};
 
 
 extern const char* VertexShaderSource;
