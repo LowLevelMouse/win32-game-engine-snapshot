@@ -146,40 +146,6 @@ image LoadImage(const char* Filename)
 	return Image;
 }
 
-void UpdateGameState(input* Input, entity* Entity, camera* Camera)
-{	
-	(void)Input;
-	
-	float DX = 0.0f;
-	float DY = 0.0f;
-	
-	bool Right = 0;//Input->WasDown[VK_RIGHT];
-	bool Left = 0;//Input->WasDown[VK_LEFT];
-	bool Up = 0;//Input->WasDown[VK_UP];
-	bool Down = 0;//Input->WasDown[VK_DOWN];
-	
-	float Speed = 4.0f;
-	if(Right) DX = 1.0f;
-	if(Left) DX = -1.0f;
-	if(Up) DY = 1.0f;
-	if(Down) DY = -1.0f;
-	
-
-	float Magnitude = sqrtf(DX * DX + DY * DY);
-	if(Magnitude > 0.0f)
-	{
-		DX /= Magnitude;
-		DY /= Magnitude;
-		
-		Entity->X += DX * Speed;
-		Entity->Y += DY * Speed;
-		Camera->X += DX * Speed;
-		Camera->Y += DY * Speed;
-		
-		//SetQuadVertices(Vertices, Entity->X, Entity->Y, Entity->Width, Entity->Height);
-	}
-}
-
 collision StandardCollision(entity Entity)
 {
 	collision Collision = {};
@@ -234,10 +200,9 @@ void PopulateWorld(entity* Entities, int* EntityCount)
 	}
 }
 
-bool CollisionCheckPair(float AX, float AY, float AWidth, float AHeight,
+bool CollisionCheckPair(float Epsilon, float AX, float AY, float AWidth, float AHeight,
 					float BX, float BY, float BWidth, float BHeight)
 {
-	const float Epsilon = 10.0f;
 	bool Collided = false;
 	//Pos + Dim will be 1 greater than the pos so we use strictly < or > no >= or <= since that would be overlapping
 	if( (AX < BX + BWidth + Epsilon) && (AX + AWidth > BX - Epsilon) && (AY < BY + BHeight + Epsilon) && (AY + AHeight > BY - Epsilon) )
@@ -247,94 +212,6 @@ bool CollisionCheckPair(float AX, float AY, float AWidth, float AHeight,
 	
 	return Collided;
 }
-
-void ApplyCollisionCorrection(v2 NewPosition, entity* CollideEntity, camera* Camera)
-{
-	CollideEntity->X += NewPosition.X;
-	CollideEntity->Y += NewPosition.Y;
-	
-	Camera->X += NewPosition.X;
-	Camera->Y += NewPosition.Y;
-}
-
-v2 CollisionCorrectionTest(entity* CollideEntity, entity* HitEntity)
-{
-	
-	float OverlapAmounts[4] = 
-	{  
-		(CollideEntity->X + CollideEntity->Width) - HitEntity->X,  //Left
-		(HitEntity->X + HitEntity->Width) - CollideEntity->X,     //Right
-		(CollideEntity->Y + CollideEntity->Height) - HitEntity->Y, //Bottom
-		(HitEntity->Y + HitEntity->Height) - CollideEntity->Y,    //Top
-	};
-			
-	float MinAmount = OverlapAmounts[0];
-	int MinWall = 0;
-	for(int Wall = 1; Wall < 4; Wall++)
-	{
-		float OverlapAmount = OverlapAmounts[Wall];
-		if(OverlapAmount < MinAmount)
-		{
-			MinAmount = OverlapAmount;
-			MinWall = Wall;
-		}
-	}
-	
-	v2 NewPosition = {};
-
-	const float Epsilon = 10.0f;
-	
-	switch(MinWall)
-	{
-		case 0: 
-			NewPosition.X = -MinAmount - Epsilon; 
-		break;
-		case 1: 
-			NewPosition.X = MinAmount + Epsilon; 
-		break;
-		case 2: 
-			NewPosition.Y = -MinAmount - Epsilon; 
-		break;
-		case 3: 
-			NewPosition.Y = MinAmount + Epsilon; 
-		break;
-	}
-	
-	return NewPosition;
-}
-
-entity* CollisionCheckGlobal(entity* Entities, int EntityCount, entity* CollideEntity, int CollideEntityIndex, camera* Camera)
-{
-	entity* HitEntity = 0;
-	for(int EntityIndex = 0; EntityIndex < EntityCount; EntityIndex++)
-	{
-		if(EntityIndex != CollideEntityIndex)
-		{
-			entity* TestEntity = &Entities[EntityIndex];
-			bool Collided = CollisionCheckPair(CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
-			if(Collided)
-			{
-				
-				HitEntity = TestEntity;
-				v2 NewPosition = CollisionCorrectionTest(CollideEntity, HitEntity);
-				//ApplyCollisionCorrection(NewPosition, CollideEntity, Camera);
-				
-				#if 1
-				Collided = CollisionCheckPair(NewPosition.X, NewPosition.Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
-				if(!Collided)
-				{
-					HitEntity = TestEntity;
-					ApplyCollisionCorrection(NewPosition, CollideEntity, Camera);
-				}
-				#endif
-			}
-		}
-		
-	}
-	
-	return HitEntity;
-}
-
 
 void OrthographicProjectionMatrix(float* ProjMatrix, float Left, float Bottom, float Right, float Top)
 {
@@ -350,16 +227,40 @@ void OrthographicProjectionMatrix(float* ProjMatrix, float Left, float Bottom, f
 						  
 }
 
-#if 0
-void test(game_state* GameState)
+void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* Input, entity* CollideEntity, int CollideEntityIndex)
 {
+	float DX = 0.0f;
+	float DY = 0.0f;
+	
+	bool Left = Input->WasDown[Button_Left];
+	bool Up = Input->WasDown[Button_Up];
+	bool Right = Input->WasDown[Button_Right];
+	bool Down = Input->WasDown[Button_Down];
+	
+	float Speed = 4.0f;
+	if(Right) DX = 1.0f;
+	if(Left) DX = -1.0f;
+	if(Up) DY = 1.0f;
+	if(Down) DY = -1.0f;
+	
+
+	float Magnitude = sqrtf(DX * DX + DY * DY);
+	if(Magnitude > 0.0f)
+	{
+		DX /= Magnitude;
+		DY /= Magnitude;
+	}
+	
+	CollideEntity->X += DX * Speed;
+	Camera->X += DX * Speed;
+	
 	const float Epsilon = 10.0f;
 	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
 	{
 		entity* TestEntity = &GameState->Entities[EntityIndex];
 		if(EntityIndex != CollideEntityIndex)
 		{
-			bool Collided = CollisionCheckPair(CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
+			bool Collided = CollisionCheckPair(Epsilon, CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
 			
 			if(Collided)
 			{
@@ -368,20 +269,51 @@ void test(game_state* GameState)
 				{
 					OverlapX = ((CollideEntity->X + CollideEntity->Width) - TestEntity->X);//Right Side Hit
 					CollideEntity->X -= (OverlapX + Epsilon);
-					Camera.X -= (OverlapX + Epsilon);
+					Camera->X -= (OverlapX + Epsilon);
 				}
 				else if (DX < 0)
 				{
 					OverlapX = ((TestEntity->X + TestEntity->Width) - CollideEntity->X);//Left Side Hit
 					CollideEntity->X += (OverlapX + Epsilon);
-					Camera.X += (OverlapX + Epsilon);
+					Camera->X += (OverlapX + Epsilon);
+				}
+			}
+			
+		}
+	}
+	
+	CollideEntity->Y += DY * Speed;
+	Camera->Y += DY * Speed;
+	
+	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
+	{
+		entity* TestEntity = &GameState->Entities[EntityIndex];
+		if(EntityIndex != CollideEntityIndex)
+		{
+
+					
+			bool Collided = CollisionCheckPair(Epsilon, CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
+			
+			if(Collided)
+			{
+				float OverlapY = 0;
+				if(DY > 0)
+				{
+					OverlapY = ((CollideEntity->Y + CollideEntity->Height) - TestEntity->Y); //Right Side Hit
+					CollideEntity->Y -= (OverlapY + Epsilon);
+					Camera->Y -= (OverlapY + Epsilon);
+				}
+				else if (DY < 0)
+				{
+					OverlapY = ((TestEntity->Y + TestEntity->Height) - CollideEntity->Y);//Left Side Hit
+					CollideEntity->Y += (OverlapY + Epsilon);
+					Camera->Y += (OverlapY + Epsilon);
 				}
 			}
 			
 		}
 	}
 }
-#endif
 
 //UPDATE IMAGE LOAD FAILED CASE
 
@@ -453,98 +385,9 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	camera Camera = {CenterCameraX - HalfW, CenterCameraY - HalfH, CameraWidth, CameraHeight};
 		
 	float ProjMatrix[16];
-	OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
+	//OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
 	
-	//GetInputStandard(Input);
-	
-	float DX = 0.0f;
-	float DY = 0.0f;
-	
-	bool Left = Input->WasDown[Button_Left];
-	bool Up = Input->WasDown[Button_Up];
-	bool Right = Input->WasDown[Button_Right];
-	bool Down = Input->WasDown[Button_Down];
-	
-	float Speed = 4.0f;
-	if(Right) DX = 1.0f;
-	if(Left) DX = -1.0f;
-	if(Up) DY = 1.0f;
-	if(Down) DY = -1.0f;
-	
-
-	float Magnitude = sqrtf(DX * DX + DY * DY);
-	if(Magnitude > 0.0f)
-	{
-		DX /= Magnitude;
-		DY /= Magnitude;
-	}
-	
-	entity* CollideEntity = GameState->PlayerEntity;
-	int CollideEntityIndex = GameState->PlayerEntityIndex;
-	
-	CollideEntity->X += DX * Speed;
-	Camera.X += DX * Speed;
-	
-	const float Epsilon = 10.0f;
-	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
-	{
-		entity* TestEntity = &GameState->Entities[EntityIndex];
-		if(EntityIndex != CollideEntityIndex)
-		{
-			bool Collided = CollisionCheckPair(CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
-			
-			if(Collided)
-			{
-				float OverlapX = 0;
-				if(DX > 0)
-				{
-					OverlapX = ((CollideEntity->X + CollideEntity->Width) - TestEntity->X);//Right Side Hit
-					CollideEntity->X -= (OverlapX + Epsilon);
-					Camera.X -= (OverlapX + Epsilon);
-				}
-				else if (DX < 0)
-				{
-					OverlapX = ((TestEntity->X + TestEntity->Width) - CollideEntity->X);//Left Side Hit
-					CollideEntity->X += (OverlapX + Epsilon);
-					Camera.X += (OverlapX + Epsilon);
-				}
-			}
-			
-		}
-	}
-	
-	CollideEntity->Y += DY * Speed;
-	Camera.Y += DY * Speed;
-	
-	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
-	{
-		entity* TestEntity = &GameState->Entities[EntityIndex];
-		if(EntityIndex != CollideEntityIndex)
-		{
-
-					
-			bool Collided = CollisionCheckPair(CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
-			
-			if(Collided)
-			{
-				float OverlapY = 0;
-				if(DY > 0)
-				{
-					OverlapY = ((CollideEntity->Y + CollideEntity->Height) - TestEntity->Y); //Right Side Hit
-					CollideEntity->Y -= (OverlapY + Epsilon);
-					Camera.Y -= (OverlapY + Epsilon);
-				}
-				else if (DY < 0)
-				{
-					OverlapY = ((TestEntity->Y + TestEntity->Height) - CollideEntity->Y);//Left Side Hit
-					CollideEntity->Y += (OverlapY + Epsilon);
-					Camera.Y += (OverlapY + Epsilon);
-				}
-			}
-			
-		}
-	}
-	
+	MoveAndCollisionCheckGlobal(GameState, &Camera, Input, GameState->PlayerEntity, GameState->PlayerEntityIndex);
 	
 	OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
 	

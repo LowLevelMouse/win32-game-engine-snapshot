@@ -515,14 +515,6 @@ void StoreInputState(input* Input)
 	}
 }
 
-#if 0
-void GetInputStandard(input* Input)
-{
-	PollInput(Input);
-	StoreInputState(Input);
-}
-#endif
-
 //This needs to be more descriptive and potentially take in dynamic paramaters so we can account for a different layout
 void SetQuadVertices(float* Vertices, float X, float Y, float Width, float Height)
 {
@@ -538,8 +530,6 @@ void SetQuadVertices(float* Vertices, float X, float Y, float Width, float Heigh
 	Vertices[9] = Y;
 	Vertices[13] = Y;
 }
-
-
 
 memory InitializeMemory()
 {
@@ -561,6 +551,7 @@ memory InitializeMemory()
 	
 	return Memory;
 }
+
 ///
 //NEED TO MAKE TIMING ROBUST!!!
 ///
@@ -638,6 +629,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	}
 	
 	
+	//Setup OpenGL state
 	GLuint VAO, VBO, ShaderProgram;
 	float DummyVerticies[] = 
 	{
@@ -661,9 +653,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	
 	win32_input Win32Input = {};
 	input Input = {};
+	
 	LARGE_INTEGER LastCounter = {};
 	QueryPerformanceCounter(&LastCounter);
-	
 	
 	bool Running = true;
 	MSG Msg = {};

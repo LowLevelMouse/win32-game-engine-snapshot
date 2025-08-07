@@ -78,6 +78,11 @@ struct xaudio2_buffer
 	float DeltaTheta;
 };
 
+struct win32_input
+{
+	bool IsDown[256];
+	bool WasDown[256];
+};
 
 
 
