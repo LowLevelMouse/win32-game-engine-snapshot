@@ -717,12 +717,16 @@ R"(
 const char* FragmentShaderSource =
 R"(
 	#version 330 core
-	
+	in vec2 TexCoord;
 	out vec4 FragColour;
+	
+	uniform sampler2D BrickTexture;
 	uniform vec4 Colour;
 	void main()
 	{
-		FragColour = Colour;
+		vec4 TexColour = texture(BrickTexture, TexCoord);
+		FragColour = TexColour * Colour;
+		//FragColour = Colour;
 	}
 )";
 

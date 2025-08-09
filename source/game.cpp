@@ -34,9 +34,9 @@ uint8_t MaxUint8(uint8_t A, uint8_t B)
 	return Result;
 }
 
-void PremultiplyAlpha(image* Image)
+void PremultiplyAlpha(image* Image, void* RawData)
 {
-	uint8_t* Data = (uint8_t*)Image->Data;
+	uint8_t* Data = (uint8_t*)RawData;
 	for(int Y = 0; Y < Image->Height; Y++)
 	{
 		uint32_t* Row = (uint32_t*)Data;
@@ -62,13 +62,13 @@ void PremultiplyAlpha(image* Image)
 	
 }
 
-void PremultiplyAlpha_4x(image* Image)
+void PremultiplyAlpha_4x(image* Image, void* RawData)
 {
 	__m128i I255_4x = _mm_set1_epi32(255);
 	__m128i I0_4x =  _mm_set1_epi32(0);
 	__m128i MaskFF = _mm_set1_epi32(0xFF);
 			
-	uint8_t* Data = (uint8_t*)Image->Data;
+	uint8_t* Data = (uint8_t*)RawData;
 	for(int Y = 0; Y < Image->Height; Y++)
 	{
 		uint32_t* Row = (uint32_t*)Data;
@@ -138,10 +138,33 @@ image LoadImage(const char* Filename)
 	unsigned char* Data = stbi_load(Filename, &Image.Width, &Image.Height, &Channels, ChanneslsForce);
 	if(Data)
 	{
-		Image.Data = Data;
-		Image.Filename = Filename;
+		//NOTE:The image struct is not fully filled yet here
+#if 0
+		PremultiplyAlpha(&Image, Data); 
+#else
+		PremultiplyAlpha_4x(&Image, Data);
+#endif
+	
+		//Image.Data = Data;
+		snprintf(Image.Filename, sizeof(Image.Filename), "%s", Filename);
 		Image.Format = GL_RGBA;
 		Image.Pitch = Image.Width * ChanneslsForce;
+		
+		glGenTextures(1, &Image.TextureID);
+		glBindTexture(GL_TEXTURE_2D, Image.TextureID);
+		
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+		//OpenGL prefers adding explicity the bpp like with "8" here
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, Image.Width, Image.Height, 0, Image.Format, GL_UNSIGNED_BYTE, Data);
+		
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		
+		glGenerateMipmap(GL_TEXTURE_2D);
+		
+		stbi_image_free(Data);
 	}
 	return Image;
 }
@@ -173,6 +196,17 @@ int AddEntity(entity* Entities, int* EntityCount, float X, float Y, float Width,
 	Entities[(*EntityCount)++] = Entity;
 	
 	return EntityIndex;
+}
+
+int AddImage(image* Images, int* ImageCount, char* Filename)
+{
+	int ImageIndex = *ImageCount;
+	
+	image Image = LoadImage(Filename);
+	
+	Images[(*ImageCount)++] = Image;
+	
+	return ImageIndex;
 }
 
 void PopulateWorld(entity* Entities, int* EntityCount)
@@ -328,35 +362,13 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		game_state* GameState = Memory->GameState;
 		
 		GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0, 0, 640 - 2*150, 480 - 2*150); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
-		GameState->PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
-		
-		GameState->Image = LoadImage("brick_test.png");
-		if(!GameState->Image.Data)
-		{
-			//Dialog("Could not load image");
-			//return EXIT_FAILURE;
-		}
-		
-		GameState->PlayerEntity->Image = &GameState->Image;
+		entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
+
+		GameState->PlayerTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../brick_test.png");
+		PlayerEntity->ImageIndex = GameState->PlayerTextureIndex;
 		
 		PopulateWorld(GameState->Entities, &GameState->EntityCount);
-		
-	#if 0
-		PremultiplyAlpha(&GameState->Image);
-	#else
-		PremultiplyAlpha_4x(&GameState->Image);
-	#endif
-		
-		glGenTextures(1, &GameState->PlayerEntity->Image->TextureID);
-		glBindTexture(GL_TEXTURE_2D, GameState->PlayerEntity->Image->TextureID);
-		
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, GameState->PlayerEntity->Image->Width, GameState->PlayerEntity->Image->Height, 0, GameState->PlayerEntity->Image->Format, GL_UNSIGNED_BYTE, GameState->PlayerEntity->Image->Data);
-		glGenerateMipmap(GL_TEXTURE_2D);
+	
 		//GLuint TexLoc = glGetUniformLocation(ShaderProgram, "BrickTexture");
 		
 		glEnable(GL_BLEND);
@@ -371,6 +383,8 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	}
 	
 	game_state* GameState = Memory->GameState;
+	entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
+	image* PlayerImage = &GameState->Images[GameState->PlayerTextureIndex];
 	
 	float CameraWidth = 640 * 1.5f;
 	float CameraHeight = 480 * 1.5f;
@@ -378,8 +392,8 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	float HalfW = CameraWidth / 2.0f;
 	float HalfH = CameraHeight / 2.0f;
 	
-	float CenterCameraX = GameState->PlayerEntity->X + GameState->PlayerEntity->Width / 2.0f;
-	float CenterCameraY = GameState->PlayerEntity->Y + GameState->PlayerEntity->Height / 2.0f;
+	float CenterCameraX = PlayerEntity->X + PlayerEntity->Width / 2.0f;
+	float CenterCameraY = PlayerEntity->Y + PlayerEntity->Height / 2.0f;
 	
 	
 	camera Camera = {CenterCameraX - HalfW, CenterCameraY - HalfH, CameraWidth, CameraHeight};
@@ -387,7 +401,7 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	float ProjMatrix[16];
 	//OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
 	
-	MoveAndCollisionCheckGlobal(GameState, &Camera, Input, GameState->PlayerEntity, GameState->PlayerEntityIndex);
+	MoveAndCollisionCheckGlobal(GameState, &Camera, Input, PlayerEntity, GameState->PlayerEntityIndex);
 	
 	OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
 	
@@ -403,7 +417,7 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	glUniform1i(GameState->BrickLoc, 0);
 	
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, GameState->Image.TextureID);
+	glBindTexture(GL_TEXTURE_2D, PlayerImage->TextureID);
 	
 	glBindVertexArray(*VAO);
 	//glDrawArrays(GL_TRIANGLES, 0, 6);
