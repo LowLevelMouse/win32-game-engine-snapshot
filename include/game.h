@@ -56,7 +56,13 @@ struct game_state
 	
 	GLuint ProjLoc;
 	GLuint BrickLoc; 
-	GLuint ColourPos;
+	GLuint ColourLoc;
+	
+	GLuint BaseColourLoc;
+	GLuint LightPosLoc;
+	GLuint LightColourLoc;
+	GLuint LightRadiusLoc;
+	GLuint AmbientLoc;
 };
 
 

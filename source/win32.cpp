@@ -8,6 +8,11 @@
 
 #include "win32.h"
 
+
+static GLuint gFboScene = 0;
+static GLuint gTexScen = 0;
+static GLuint gSceneW = 0, gSceenH = 0;
+
 void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram);
 
 extern "C" 
@@ -213,6 +218,7 @@ HGLRC InitializeOpenGL(HDC WindowDC)
 	return NewGLContext;
 	
 }
+
 
 void PrepFrame(GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float* Vertices, size_t VerticesSize)
 {
@@ -705,11 +711,15 @@ R"(
 	layout (location = 0) in vec2 aPos;
 	layout (location = 1) in vec2 aTexCoord;
 	
+	out vec2 TexCoord;
+	out vec2 WorldPos;
+	
 	uniform mat4 ProjMatrix;
 	
-	out vec2 TexCoord;
+
 	void main()
 	{
+		WorldPos = aPos;
 		gl_Position = ProjMatrix * vec4(aPos, 0.0f, 1.0f);
 		TexCoord = aTexCoord;
 	}
@@ -718,14 +728,32 @@ const char* FragmentShaderSource =
 R"(
 	#version 330 core
 	in vec2 TexCoord;
+	in vec2 WorldPos;
+	
 	out vec4 FragColour;
 	
 	uniform sampler2D BrickTexture;
-	uniform vec4 Colour;
+	
+	uniform vec4 Colour; //For Modulation
+	uniform vec2 LightPos;
+	uniform vec3 LightColour;
+	uniform float LightRadius;
+	uniform float Ambient;
+	
 	void main()
 	{
 		vec4 TexColour = texture(BrickTexture, TexCoord);
-		FragColour = TexColour * Colour;
+				
+		float Distance = distance(WorldPos, LightPos);
+		float Attenuation = clamp(1.0 - (Distance / LightRadius), 0.0, 1.0);
+		Attenuation *= Attenuation;
+		float Brightness = Ambient * (1 - Attenuation) + 1.0f * Attenuation;
+		
+		vec3 RGB = TexColour.rgb * Colour.rgb * Brightness * LightColour;
+
+		float A = TexColour.a * Colour.a;
+
+		FragColour = vec4(RGB, A);
 		//FragColour = Colour;
 	}
 )";

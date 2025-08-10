@@ -377,14 +377,19 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 
 		GameState->ProjLoc = glGetUniformLocation(*ShaderProgram, "ProjMatrix");
 		GameState->BrickLoc = glGetUniformLocation(*ShaderProgram, "BrickTexture");
-		GameState->ColourPos = glGetUniformLocation(*ShaderProgram, "Colour");
+		GameState->ColourLoc = glGetUniformLocation(*ShaderProgram, "Colour");
+		GameState->LightPosLoc = glGetUniformLocation(*ShaderProgram, "LightPos");
+		GameState->LightColourLoc = glGetUniformLocation(*ShaderProgram, "LightColour");
+		GameState->LightRadiusLoc = glGetUniformLocation(*ShaderProgram, "LightRadius");
+		GameState->AmbientLoc = glGetUniformLocation(*ShaderProgram, "Ambient");
+		
 		
 		Memory->IsGameStateInit = true;
 	}
 	
 	game_state* GameState = Memory->GameState;
 	entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
-	image* PlayerImage = &GameState->Images[GameState->PlayerTextureIndex];
+	image* PlayerImage = &GameState->Images[PlayerEntity->ImageIndex];
 	
 	float CameraWidth = 640 * 1.5f;
 	float CameraHeight = 480 * 1.5f;
@@ -412,9 +417,17 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	glUseProgram(*ShaderProgram);
 	
 	float FloatTestAlpha = 0.5f;
-	glUniform4f(GameState->ColourPos, 1.0f * FloatTestAlpha, 0, 0, FloatTestAlpha);
+	glUniform4f(GameState->ColourLoc, 1.0f * FloatTestAlpha, 0, 0, FloatTestAlpha);
 	glUniformMatrix4fv(GameState->ProjLoc, 1, GL_FALSE, ProjMatrix);
 	glUniform1i(GameState->BrickLoc, 0);
+	
+	float LightX = 400.0f;
+	float LightY = 300.0f;
+	
+	glUniform2f(GameState->LightPosLoc, LightX, LightY);
+	glUniform3f(GameState->LightColourLoc, 1.0f, 1.0f, 1.0f);
+	glUniform1f(GameState->LightRadiusLoc, 250.0f);
+	glUniform1f(GameState->AmbientLoc, 0.2f);
 	
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, PlayerImage->TextureID);
