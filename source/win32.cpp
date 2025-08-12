@@ -292,6 +292,7 @@ void PrepFrame(GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float* Vertices,
 	glDeleteShader(FragmentShader);
 	
 	glViewport(0, 0, 640, 480);
+
 }
 
 
@@ -743,6 +744,7 @@ R"(
 	void main()
 	{
 		vec4 TexColour = texture(BrickTexture, TexCoord);
+		//vec4 TexColour = vec4(1.0);
 				
 		float Distance = distance(WorldPos, LightPos);
 		float Attenuation = clamp(1.0 - (Distance / LightRadius), 0.0, 1.0);

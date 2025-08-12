@@ -54,6 +54,8 @@ struct game_state
 	int PlayerTextureIndex;
 	bool IsInit;
 	
+	GLuint BackgroundTexture;
+	
 	GLuint ProjLoc;
 	GLuint BrickLoc; 
 	GLuint ColourLoc;

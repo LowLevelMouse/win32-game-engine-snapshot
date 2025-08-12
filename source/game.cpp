@@ -383,6 +383,31 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		GameState->LightRadiusLoc = glGetUniformLocation(*ShaderProgram, "LightRadius");
 		GameState->AmbientLoc = glGetUniformLocation(*ShaderProgram, "Ambient");
 		
+		//Background Texture
+		glGenTextures(1, &GameState->BackgroundTexture);
+		glBindTexture(GL_TEXTURE_2D, GameState->BackgroundTexture);
+		//glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+		uint8_t Alpha = 255;
+		float R = 50.0f / 255.0f;
+		float G = 50.0f / 255.0f;
+		float B = 50.0f / 255.0f;
+		float A = Alpha / 255.0f;
+		
+		R*= A;
+		G*= A;
+		B*= A;
+		
+		uint8_t BGPixel[4] = {(uint8_t)(R * 255.0f + 0.5f), (uint8_t)(G * 255.0f + 0.5f), (uint8_t)(B * 255.0f + 0.5f), Alpha};
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, BGPixel);
+		
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		
+		//In case we sample outside of bounds by accident 
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		
 		
 		Memory->IsGameStateInit = true;
 	}
@@ -410,14 +435,20 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	
 	OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
 	
-	float Alpha = 1.0f;
-	glClearColor(0.2f * Alpha, 0.3f * Alpha, 0.3f * Alpha, Alpha);
+	float BackgroundVertices[] =
+	{
+		CenterCameraX - HalfW, CenterCameraY - HalfH, 0.0f, 0.0f,
+		CenterCameraX + HalfW, CenterCameraY - HalfH, 1.0f, 0.0f,
+		CenterCameraX + HalfW, CenterCameraY + HalfH, 1.0f, 1.0f,
+		CenterCameraX - HalfW, CenterCameraY + HalfH, 0.0f, 1.0f,
+	};
+	
+	//float Alpha = 1.0f;
+	//glClearColor(0.2f * Alpha, 0.3f * Alpha, 0.3f * Alpha, Alpha);
+	glClearColor(0, 0, 0, 0);
 	glClear(GL_COLOR_BUFFER_BIT);
 	
 	glUseProgram(*ShaderProgram);
-	
-	float FloatTestAlpha = 0.5f;
-	glUniform4f(GameState->ColourLoc, 1.0f * FloatTestAlpha, 0, 0, FloatTestAlpha);
 	glUniformMatrix4fv(GameState->ProjLoc, 1, GL_FALSE, ProjMatrix);
 	glUniform1i(GameState->BrickLoc, 0);
 	
@@ -425,17 +456,26 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	float LightY = 300.0f;
 	
 	glUniform2f(GameState->LightPosLoc, LightX, LightY);
-	glUniform3f(GameState->LightColourLoc, 1.0f, 1.0f, 1.0f);
+	glUniform3f(GameState->LightColourLoc, 2.0f, 2.0f, 2.0f);
 	glUniform1f(GameState->LightRadiusLoc, 250.0f);
 	glUniform1f(GameState->AmbientLoc, 0.2f);
 	
+	//glUniform4f(GameState->ColourLoc, 0.2f*Alpha, 0.3f*Alpha, 0.3f*Alpha, Alpha);
+	glUniform4f(GameState->ColourLoc, 1.0f, 1.0f, 1.0f, 1.0f);
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, PlayerImage->TextureID);
+	glBindTexture(GL_TEXTURE_2D, GameState->BackgroundTexture);
 	
 	glBindVertexArray(*VAO);
-	//glDrawArrays(GL_TRIANGLES, 0, 6);
-	
 	glBindBuffer(GL_ARRAY_BUFFER, *VBO);
+	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(BackgroundVertices), BackgroundVertices);
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+	
+	
+	float FloatTestAlpha = 0.5f;
+	glUniform4f(GameState->ColourLoc, 1.0f * FloatTestAlpha, 0, 0, FloatTestAlpha);
+	
+	glBindTexture(GL_TEXTURE_2D, PlayerImage->TextureID);
+	//glDrawArrays(GL_TRIANGLES, 0, 6);
 	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
 	{
 		entity CurrEntity = GameState->Entities[EntityIndex];
@@ -448,9 +488,6 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 
 		};
 		int VerticesSize = sizeof(Vertices);
-		
-		glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
-		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 		
 		glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
