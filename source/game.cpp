@@ -184,7 +184,7 @@ collision StandardCollision(entity Entity)
 	return Collision;
 }
 
-int AddEntity(entity* Entities, int* EntityCount, float X, float Y, float Width, float Height)
+int AddEntity(entity* Entities, int* EntityCount, float X, float Y, float Width, float Height, entity_type Type)
 {
 	int EntityIndex = *EntityCount;
 	
@@ -194,6 +194,7 @@ int AddEntity(entity* Entities, int* EntityCount, float X, float Y, float Width,
 	Entity.Width = Width;
 	Entity.Height = Height;
 	Entity.Collision = StandardCollision(Entity);
+	Entity.Type = Type;
 	Entity.Index = EntityIndex;
 	
 	Entities[(*EntityCount)++] = Entity;
@@ -228,7 +229,7 @@ void PopulateWorld(entity* Entities, int* EntityCount)
 		X = XStart;
 		for(int EntityX = 0; EntityX < 10; EntityX++)
 		{
-			AddEntity(Entities, EntityCount, X, Y, Width, Height);
+			AddEntity(Entities, EntityCount, X, Y, Width, Height, Entity_Type_Other);
 			
 			X+= Width + PadX;
 		}
@@ -425,7 +426,7 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		Memory->GameState = PushStruct(&Memory->PermanentMemory, game_state);
 		game_state* GameState = Memory->GameState;
 		
-		GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0, 0, 640 - 2*150, 480 - 2*150); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
+		GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0, 0, 640 - 2*150, 480 - 2*150, Entity_Type_Player); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
 		entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
 
 		GameState->PlayerTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../brick_test.png", Image_Option_Premultiply);
@@ -499,6 +500,14 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	camera Camera = {CenterCameraX - HalfW, CenterCameraY - HalfH, CameraWidth, CameraHeight};
 	
 	MoveAndCollisionCheckGlobal(GameState, &Camera, Input, PlayerEntity, GameState->PlayerEntityIndex);
+	if(Input->IsDown[Button_Left])
+	{
+		PlayerEntity->Angle -= DT;
+	}
+	else if(Input->IsDown[Button_Right])
+	{
+		PlayerEntity->Angle += DT;
+	}
 	
 	//if(Input->IsDown[Button_Space] && !Input->WasDown[Button_Space])
 	if(Input->IsDown[Button_Space])
@@ -553,19 +562,60 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	//glDrawArrays(GL_TRIANGLES, 0, 6);
 	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
 	{
-		entity CurrEntity = GameState->Entities[EntityIndex];
-		float Vertices[] = 
-		{
-		   CurrEntity.X + CurrEntity.Width,  CurrEntity.Y + CurrEntity.Height, 1.0f, 1.0f,//Top right
-		   CurrEntity.X,                 	 CurrEntity.Y + CurrEntity.Height, 0.0f, 1.0f,//Top left
-		   CurrEntity.X,                     CurrEntity.Y,                     0.0f, 0.0f,//Bottom left
-		   CurrEntity.X + CurrEntity.Width,  CurrEntity.Y,                     1.0f, 0.0f,//Bottom right
-
-		};
-		int VerticesSize = sizeof(Vertices);
+		entity* CurrEntity = &GameState->Entities[EntityIndex];
 		
-		glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
-		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+		if(CurrEntity->Type == Entity_Type_Player)
+		{
+			//Rotate Around Center of Triangle instead of origin
+			float PivotX = CurrEntity->X + CurrEntity->Width * 0.5f; 
+			float PivotY = CurrEntity->Y + CurrEntity->Height* 0.5f;
+			
+			//Local coordinates, center is the middle of the triangle
+			v2 Left = {-0.5f*CurrEntity->Width, -0.5f*CurrEntity->Height};
+			v2 Right = {0.5f*CurrEntity->Width, -0.5f*CurrEntity->Height};
+			v2 Top = {0, 0.5f*CurrEntity->Height};
+			
+			float CosAngle = cosf(CurrEntity->Angle);
+			float SinAngle = sinf(CurrEntity->Angle);
+			
+			v2 LeftRotated = {PivotX + (Left.X * CosAngle - Left.Y * SinAngle), PivotY + (Left.X * SinAngle + Left.Y * CosAngle)};
+			v2 RightRotated = {PivotX + (Right.X * CosAngle - Right.Y * SinAngle), PivotY + (Right.X * SinAngle + Right.Y * CosAngle)};
+			v2 TopRotated = {PivotX + (Top.X * CosAngle - Top.Y * SinAngle), PivotY + (Top.X * SinAngle + Top.Y * CosAngle)};
+			
+			/*float Vertices[] = 
+			{
+				CurrEntity->X,                          CurrEntity->Y,                      0.0f, 0.0f,
+				CurrEntity->X + CurrEntity->Width,      CurrEntity->Y,                      1.0f, 0.0f,
+				CurrEntity->X + 0.5f*CurrEntity->Width, CurrEntity->Y + CurrEntity->Height, 0.5f, 1.0f,
+			};*/
+			float Vertices[] = 
+			{
+				LeftRotated.X,                          LeftRotated.Y,                      0.0f, 0.0f,
+				RightRotated.X,                         RightRotated.Y,                     1.0f, 0.0f,
+				TopRotated.X,                           TopRotated.Y,                       0.5f, 1.0f,
+			};
+			int VerticesSize = sizeof(Vertices);
+			
+			glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
+			glDrawArrays(GL_TRIANGLES, 0, 3);
+			//glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+		}
+		else if (CurrEntity->Type == Entity_Type_Other)
+		{
+			float Vertices[] = 
+			{
+			   CurrEntity->X + CurrEntity->Width,  CurrEntity->Y + CurrEntity->Height, 1.0f, 1.0f,//Top right
+			   CurrEntity->X,                 	   CurrEntity->Y + CurrEntity->Height, 0.0f, 1.0f,//Top left
+			   CurrEntity->X,                      CurrEntity->Y,                      0.0f, 0.0f,//Bottom left
+			   CurrEntity->X + CurrEntity->Width,  CurrEntity->Y,                      1.0f, 0.0f,//Bottom right
+
+			};
+			int VerticesSize = sizeof(Vertices);
+			
+			glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
+			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+		}
 	}
 	
 	//Particle Render

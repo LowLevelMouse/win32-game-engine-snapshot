@@ -747,7 +747,7 @@ R"(
 	{
 		vec4 TexColour = texture(BrickTexture, TexCoord);
 		float dist = distance(WorldPos, LightPos);
-		float atten = 1.0 - smoothstep(LightRadius * 0.8, LightRadius, dist);
+		float atten = 1.0 - smoothstep(LightRadius * 0.0f, LightRadius, dist);
 		vec3 lit = mix(vec3(Ambient), LightColour, atten);
 		vec3 color = TexColour.rgb * Colour.rgb * lit;
 		float alpha = TexColour.a * Colour.a;

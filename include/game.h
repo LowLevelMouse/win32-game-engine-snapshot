@@ -45,6 +45,13 @@ enum image_option
 	Image_Option_Premultiply,
 };
 
+enum entity_type
+{
+	Entity_Type_None,
+	Entity_Type_Player,
+	Entity_Type_Other,
+};
+
 struct image
 {
 	GLuint TextureID;
@@ -62,11 +69,13 @@ struct entity
 	float X, Y;
 	float Width, Height;
 	float ScaleX, ScaleY;
-	float Theta;
+	float Angle;
 	collision Collision;
 	
 	int ImageIndex;
 	int Index;
+	
+	entity_type Type;
 };
 
 struct game_state
