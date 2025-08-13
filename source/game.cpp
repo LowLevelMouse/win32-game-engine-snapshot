@@ -129,7 +129,7 @@ void PremultiplyAlpha_4x(image* Image, void* RawData)
 }
 
 //Data should not have padding as far as I'm aware
-image LoadImage(const char* Filename)
+image LoadImage(const char* Filename, image_option Option)
 {
 	image Image = {};
 	int Channels;
@@ -139,12 +139,15 @@ image LoadImage(const char* Filename)
 	if(Data)
 	{
 		//NOTE:The image struct is not fully filled yet here
+		if(Option == Image_Option_Premultiply)
+		{
 #if 0
-		PremultiplyAlpha(&Image, Data); 
+			PremultiplyAlpha(&Image, Data); 
 #else
-		PremultiplyAlpha_4x(&Image, Data);
+			PremultiplyAlpha_4x(&Image, Data);
 #endif
-	
+		}
+		
 		//Image.Data = Data;
 		snprintf(Image.Filename, sizeof(Image.Filename), "%s", Filename);
 		Image.Format = GL_RGBA;
@@ -198,11 +201,11 @@ int AddEntity(entity* Entities, int* EntityCount, float X, float Y, float Width,
 	return EntityIndex;
 }
 
-int AddImage(image* Images, int* ImageCount, char* Filename)
+int AddImage(image* Images, int* ImageCount, char* Filename, image_option Options)
 {
 	int ImageIndex = *ImageCount;
 	
-	image Image = LoadImage(Filename);
+	image Image = LoadImage(Filename, Options);
 	
 	Images[(*ImageCount)++] = Image;
 	
@@ -349,6 +352,67 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 	}
 }
 
+void EmitParticle(particle_system* ParticleSystem, float X, float Y)
+{
+	for(int ParticleIndex = 0; ParticleIndex < MAX_PARTICLES; ParticleIndex++)
+	{
+		particle* Particle = &ParticleSystem->Particles[ParticleIndex];
+		if(!Particle->Active)
+		{
+			Particle->X = X;
+			Particle->Y = Y;
+			Particle->VX = ((rand() % 200) - 100) / 100.0f; //-1 -> 1
+			Particle->VY = ((rand() % 200) - 100) / 100.0f; //-1 -> 1
+			Particle->Size = 16.0f;
+			Particle->MaxLife = Particle->Life = 2.0f;
+			Particle->R = 1.0f;
+			Particle->G = 0.5f;
+			Particle->B = 0.0f;
+			Particle->A = 1.0f;
+			Particle->Active = true;
+			break;
+		}
+	}
+}
+
+void UpdateParticles(particle_system* ParticleSystem, float DT)
+{
+	for(int ParticleIndex = 0; ParticleIndex < MAX_PARTICLES; ParticleIndex++)
+	{
+		float Speed = 60.0f;
+		particle* Particle = &ParticleSystem->Particles[ParticleIndex];
+		Particle->X += Particle->VX * DT * Speed; 
+		Particle->Y += Particle->VY * DT * Speed;
+		Particle->Life -= DT;
+		Particle->A = Particle->Life / Particle->MaxLife;
+		Particle->Size *= 0.98f;
+		if(Particle->Life <= 0.0f)
+		{
+			Particle->Active = false;
+		}
+	}
+}
+
+v2 SquareEmission(float Diameter)
+{
+	v2 Offset = {};
+	Offset.X = (rand() / (float)RAND_MAX - 0.5f) * Diameter / 2.0f;
+	Offset.Y = (rand() / (float)RAND_MAX - 0.5f) * Diameter / 2.0f;
+	
+	return Offset;
+}
+
+v2 RadialEmission(float MaxRadius)
+{
+	v2 Offset = {};
+	
+	float Angle = (float)rand() / RAND_MAX * 2.0f * Pi32;
+	float Radius = sqrtf((float)rand() / RAND_MAX) * MaxRadius; //Need to make # of particles proportional to area
+	Offset.X = cosf(Angle)*Radius;
+	Offset.Y = sinf(Angle)*Radius;
+	
+	return Offset;
+}
 //UPDATE IMAGE LOAD FAILED CASE
 
 void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram)
@@ -364,12 +428,12 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0, 0, 640 - 2*150, 480 - 2*150); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
 		entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
 
-		GameState->PlayerTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../brick_test.png");
+		GameState->PlayerTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../brick_test.png", Image_Option_Premultiply);
 		PlayerEntity->ImageIndex = GameState->PlayerTextureIndex;
 		
+		GameState->ParticleTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../particle_high_res.png", Image_Option_None);
+		
 		PopulateWorld(GameState->Entities, &GameState->EntityCount);
-	
-		//GLuint TexLoc = glGetUniformLocation(ShaderProgram, "BrickTexture");
 		
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // For premultiplied alpha
@@ -398,6 +462,7 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		G*= A;
 		B*= A;
 		
+		//Background Texture
 		uint8_t BGPixel[4] = {(uint8_t)(R * 255.0f + 0.5f), (uint8_t)(G * 255.0f + 0.5f), (uint8_t)(B * 255.0f + 0.5f), Alpha};
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, BGPixel);
 		
@@ -409,12 +474,18 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		
 		
+		glGenTextures(1, &GameState->ParticleTexture);
+		glBindTexture(GL_TEXTURE_2D, GameState->ParticleTexture);
+		
 		Memory->IsGameStateInit = true;
 	}
+	
+	float DT = 1.0f / 60.0f;
 	
 	game_state* GameState = Memory->GameState;
 	entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
 	image* PlayerImage = &GameState->Images[PlayerEntity->ImageIndex];
+	image* ParticleImage = &GameState->Images[GameState->ParticleTextureIndex];
 	
 	float CameraWidth = 640 * 1.5f;
 	float CameraHeight = 480 * 1.5f;
@@ -425,15 +496,41 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	float CenterCameraX = PlayerEntity->X + PlayerEntity->Width / 2.0f;
 	float CenterCameraY = PlayerEntity->Y + PlayerEntity->Height / 2.0f;
 	
-	
 	camera Camera = {CenterCameraX - HalfW, CenterCameraY - HalfH, CameraWidth, CameraHeight};
-		
-	float ProjMatrix[16];
-	//OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
 	
 	MoveAndCollisionCheckGlobal(GameState, &Camera, Input, PlayerEntity, GameState->PlayerEntityIndex);
 	
+	//if(Input->IsDown[Button_Space] && !Input->WasDown[Button_Space])
+	if(Input->IsDown[Button_Space])
+	{
+		v2 Offset = RadialEmission(2.5f);
+		EmitParticle(&GameState->ParticleSystem, PlayerEntity->X + Offset.X , PlayerEntity->Y + Offset.Y);
+	}
+	
+	float ProjMatrix[16];
 	OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
+	
+	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); 
+	glClearColor(0, 0, 0, 0);
+	glClear(GL_COLOR_BUFFER_BIT);
+	
+	glEnable(GL_FRAMEBUFFER_SRGB);
+	
+	glUseProgram(*ShaderProgram);
+	glUniformMatrix4fv(GameState->ProjLoc, 1, GL_FALSE, ProjMatrix);
+	
+	float LightX = 400.0f;
+	float LightY = 300.0f;
+	glUniform2f(GameState->LightPosLoc, LightX, LightY);
+	glUniform3f(GameState->LightColourLoc, 3.0f, 3.0f, 3.0f);
+	glUniform1f(GameState->LightRadiusLoc, 125.0f);
+	glUniform1f(GameState->AmbientLoc, 0.2f);
+	
+	//Background quad render
+	//glUniform4f(GameState->ColourLoc, 0.2f*Alpha, 0.3f*Alpha, 0.3f*Alpha, Alpha);
+	glUniform4f(GameState->ColourLoc, 1.0f, 1.0f, 1.0f, 1.0f);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, GameState->BackgroundTexture);
 	
 	float BackgroundVertices[] =
 	{
@@ -443,37 +540,15 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		CenterCameraX - HalfW, CenterCameraY + HalfH, 0.0f, 1.0f,
 	};
 	
-	//float Alpha = 1.0f;
-	//glClearColor(0.2f * Alpha, 0.3f * Alpha, 0.3f * Alpha, Alpha);
-	glClearColor(0, 0, 0, 0);
-	glClear(GL_COLOR_BUFFER_BIT);
-	
-	glUseProgram(*ShaderProgram);
-	glUniformMatrix4fv(GameState->ProjLoc, 1, GL_FALSE, ProjMatrix);
-	glUniform1i(GameState->BrickLoc, 0);
-	
-	float LightX = 400.0f;
-	float LightY = 300.0f;
-	
-	glUniform2f(GameState->LightPosLoc, LightX, LightY);
-	glUniform3f(GameState->LightColourLoc, 2.0f, 2.0f, 2.0f);
-	glUniform1f(GameState->LightRadiusLoc, 250.0f);
-	glUniform1f(GameState->AmbientLoc, 0.2f);
-	
-	//glUniform4f(GameState->ColourLoc, 0.2f*Alpha, 0.3f*Alpha, 0.3f*Alpha, Alpha);
-	glUniform4f(GameState->ColourLoc, 1.0f, 1.0f, 1.0f, 1.0f);
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, GameState->BackgroundTexture);
-	
 	glBindVertexArray(*VAO);
 	glBindBuffer(GL_ARRAY_BUFFER, *VBO);
 	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(BackgroundVertices), BackgroundVertices);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 	
-	
-	float FloatTestAlpha = 0.5f;
-	glUniform4f(GameState->ColourLoc, 1.0f * FloatTestAlpha, 0, 0, FloatTestAlpha);
-	
+	//Entity Render
+	float TextureModAlpha = 1.0f;
+	glUniform4f(GameState->ColourLoc, 1.0f * TextureModAlpha, 0, 0, TextureModAlpha);
+	glUniform1i(GameState->BrickLoc, 0);
 	glBindTexture(GL_TEXTURE_2D, PlayerImage->TextureID);
 	//glDrawArrays(GL_TRIANGLES, 0, 6);
 	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
@@ -492,4 +567,32 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 	}
+	
+	//Particle Render
+	glBlendFunc(GL_ONE, GL_ONE);
+	glBindTexture(GL_TEXTURE_2D, ParticleImage->TextureID);
+	for(int ParticleIndex = 0; ParticleIndex < MAX_PARTICLES; ParticleIndex++)
+	{
+		particle* Particle = &GameState->ParticleSystem.Particles[ParticleIndex];
+		if(Particle->Active)
+		{
+			float Size = Particle->Size;
+			float Vertices[] = 
+			{
+				Particle->X + Size, Particle->Y + Size, 1.0f, 1.0f,//Top right
+				Particle->X,        Particle->Y + Size, 0.0f, 1.0f,//Top left
+				Particle->X,        Particle->Y,        0.0f, 0.0f,//Bottom left
+				Particle->X + Size, Particle->Y,        1.0f, 0.0f,//Bottom right
+			};
+			int VerticesSize = sizeof(Vertices);
+			
+			glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
+			glUniform4f(GameState->ColourLoc, Particle->R, Particle->G , Particle->B, Particle->A);
+			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+			
+		}
+		
+	}	
+	
+	UpdateParticles(&GameState->ParticleSystem, DT);
 }

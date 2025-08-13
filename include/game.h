@@ -14,10 +14,35 @@
 #define ENTITY_MAX 1000
 #define IMAGES_MAX 2
 
+#define MAX_PARTICLES 2048
+struct particle
+{
+	float X, Y;
+	float VX, VY;
+	float Life;
+	float MaxLife;
+	float Size;
+	float R, G, B, A;
+	bool Active;
+};
+
+struct particle_system
+{
+	particle Particles[MAX_PARTICLES];
+	int ParticleCount;
+};
+
+
 struct collision
 {
 	float X, Y; //Left Bottom
 	float Width, Height;
+};
+
+enum image_option
+{
+	Image_Option_None,
+	Image_Option_Premultiply,
 };
 
 struct image
@@ -52,9 +77,11 @@ struct game_state
 	int EntityCount;
 	int PlayerEntityIndex;
 	int PlayerTextureIndex;
+	int ParticleTextureIndex;
 	bool IsInit;
 	
 	GLuint BackgroundTexture;
+	GLuint ParticleTexture;
 	
 	GLuint ProjLoc;
 	GLuint BrickLoc; 
@@ -65,6 +92,10 @@ struct game_state
 	GLuint LightColourLoc;
 	GLuint LightRadiusLoc;
 	GLuint AmbientLoc;
+	
+	particle_system ParticleSystem;
+	
+	
 };
 
 

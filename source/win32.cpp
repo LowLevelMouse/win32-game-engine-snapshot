@@ -498,6 +498,7 @@ void MapWin32InputToGame(input* Input, win32_input* Win32Input)
 		Button_Down,
 		Button_Left,
 		Button_Right,
+		Button_Space,
 	};
 	*/
 	const int KeyMap[Button_Count] = 
@@ -506,6 +507,7 @@ void MapWin32InputToGame(input* Input, win32_input* Win32Input)
 		VK_DOWN,
 		VK_LEFT,
 		VK_RIGHT,
+		VK_SPACE,
 	};
 	
 	for(int Button = 0; Button < Button_Count; Button++)
@@ -744,19 +746,12 @@ R"(
 	void main()
 	{
 		vec4 TexColour = texture(BrickTexture, TexCoord);
-		//vec4 TexColour = vec4(1.0);
-				
-		float Distance = distance(WorldPos, LightPos);
-		float Attenuation = clamp(1.0 - (Distance / LightRadius), 0.0, 1.0);
-		Attenuation *= Attenuation;
-		float Brightness = Ambient * (1 - Attenuation) + 1.0f * Attenuation;
-		
-		vec3 RGB = TexColour.rgb * Colour.rgb * Brightness * LightColour;
-
-		float A = TexColour.a * Colour.a;
-
-		FragColour = vec4(RGB, A);
-		//FragColour = Colour;
+		float dist = distance(WorldPos, LightPos);
+		float atten = 1.0 - smoothstep(LightRadius * 0.8, LightRadius, dist);
+		vec3 lit = mix(vec3(Ambient), LightColour, atten);
+		vec3 color = TexColour.rgb * Colour.rgb * lit;
+		float alpha = TexColour.a * Colour.a;
+		FragColour = vec4(color, alpha);
 	}
 )";
 

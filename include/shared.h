@@ -3,6 +3,7 @@
 
 struct game_state;
 
+#define Pi32 3.1415927f
 #define Assert(Expression) do { if (!(Expression)) { *(volatile int*)0 = 0; } } while(0)
 	
 struct memory_arena
@@ -38,6 +39,7 @@ enum button
 	Button_Down,
 	Button_Left,
 	Button_Right,
+	Button_Space,
 	
 	Button_Count
 };
