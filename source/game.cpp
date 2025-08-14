@@ -172,6 +172,7 @@ image LoadImage(const char* Filename, image_option Option)
 	return Image;
 }
 
+
 collision StandardCollision(entity Entity)
 {
 	collision Collision = {};
@@ -236,6 +237,69 @@ void PopulateWorld(entity* Entities, int* EntityCount)
 		
 		Y+= Height + PadY;
 	}
+}
+
+
+void InitGameState(memory* Memory, GLuint* ShaderProgram)
+{
+	//gladLoaderLoadGL();
+		
+	Memory->GameState = PushStruct(&Memory->PermanentMemory, game_state);
+	game_state* GameState = Memory->GameState;
+	
+	GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0, 0, 640 - 2*150, 480 - 2*150, Entity_Type_Player); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
+	entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
+
+	GameState->PlayerTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../brick_test.png", Image_Option_Premultiply);
+	PlayerEntity->ImageIndex = GameState->PlayerTextureIndex;
+	
+	GameState->ParticleTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../particle_high_res.png", Image_Option_None);
+	
+	PopulateWorld(GameState->Entities, &GameState->EntityCount);
+	
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // For premultiplied alpha
+	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	GameState->ProjLoc = glGetUniformLocation(*ShaderProgram, "ProjMatrix");
+	GameState->BrickLoc = glGetUniformLocation(*ShaderProgram, "BrickTexture");
+	GameState->ColourLoc = glGetUniformLocation(*ShaderProgram, "Colour");
+	GameState->LightPosLoc = glGetUniformLocation(*ShaderProgram, "LightPos");
+	GameState->LightColourLoc = glGetUniformLocation(*ShaderProgram, "LightColour");
+	GameState->LightRadiusLoc = glGetUniformLocation(*ShaderProgram, "LightRadius");
+	GameState->AmbientLoc = glGetUniformLocation(*ShaderProgram, "Ambient");
+	
+	//Background Texture
+	glGenTextures(1, &GameState->BackgroundTexture);
+	glBindTexture(GL_TEXTURE_2D, GameState->BackgroundTexture);
+	//glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+	uint8_t Alpha = 255;
+	float R = 50.0f / 255.0f;
+	float G = 50.0f / 255.0f;
+	float B = 50.0f / 255.0f;
+	float A = Alpha / 255.0f;
+	
+	R*= A;
+	G*= A;
+	B*= A;
+	
+	//Background Texture
+	uint8_t BGPixel[4] = {(uint8_t)(R * 255.0f + 0.5f), (uint8_t)(G * 255.0f + 0.5f), (uint8_t)(B * 255.0f + 0.5f), Alpha};
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, BGPixel);
+	
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	
+	//In case we sample outside of bounds by accident 
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	
+	
+	glGenTextures(1, &GameState->ParticleTexture);
+	glBindTexture(GL_TEXTURE_2D, GameState->ParticleTexture);
+	
+	Memory->IsGameStateInit = true;
 }
 
 bool CollisionCheckPair(float Epsilon, float AX, float AY, float AWidth, float AHeight,
@@ -414,71 +478,58 @@ v2 RadialEmission(float MaxRadius)
 	
 	return Offset;
 }
+
+void SetAndUploadRotatedTraingleVertices(entity* CurrEntity)
+{
+	//Rotate Around Center of Triangle instead of origin
+	float PivotX = CurrEntity->X + CurrEntity->Width * 0.5f; 
+	float PivotY = CurrEntity->Y + CurrEntity->Height* 0.5f;
+
+	//Local coordinates, center is the middle of the triangle
+	v2 Left = {-0.5f*CurrEntity->Width, -0.5f*CurrEntity->Height};
+	v2 Right = {0.5f*CurrEntity->Width, -0.5f*CurrEntity->Height};
+	v2 Top = {0, 0.5f*CurrEntity->Height};
+
+	float CosAngle = cosf(CurrEntity->Angle);
+	float SinAngle = sinf(CurrEntity->Angle);
+
+	v2 LeftRotated = {PivotX + (Left.X * CosAngle - Left.Y * SinAngle), PivotY + (Left.X * SinAngle + Left.Y * CosAngle)};
+	v2 RightRotated = {PivotX + (Right.X * CosAngle - Right.Y * SinAngle), PivotY + (Right.X * SinAngle + Right.Y * CosAngle)};
+	v2 TopRotated = {PivotX + (Top.X * CosAngle - Top.Y * SinAngle), PivotY + (Top.X * SinAngle + Top.Y * CosAngle)};
+
+	float Vertices[] = 
+	{
+		LeftRotated.X,   LeftRotated.Y,  0.0f, 0.0f,
+		RightRotated.X,  RightRotated.Y, 1.0f, 0.0f,
+		TopRotated.X,    TopRotated.Y,   0.5f, 1.0f,
+	};
+	int VerticesSize = sizeof(Vertices);
+
+	glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
+}
+
+void SetAndUploadQuadVertices(entity* CurrEntity)
+{
+	float Vertices[] = 
+	{
+	   CurrEntity->X + CurrEntity->Width,  CurrEntity->Y + CurrEntity->Height, 1.0f, 1.0f,//Top right
+	   CurrEntity->X,                 	   CurrEntity->Y + CurrEntity->Height, 0.0f, 1.0f,//Top left
+	   CurrEntity->X,                      CurrEntity->Y,                      0.0f, 0.0f,//Bottom left
+	   CurrEntity->X + CurrEntity->Width,  CurrEntity->Y,                      1.0f, 0.0f,//Bottom right
+
+	};
+	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(Vertices), Vertices);
+	
+}
 //UPDATE IMAGE LOAD FAILED CASE
+///NEED TO MAKE TIMING ROBUST!!!
 
 void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram)
 {
 	
 	if(!Memory->IsGameStateInit)
 	{
-		//gladLoaderLoadGL();
-		
-		Memory->GameState = PushStruct(&Memory->PermanentMemory, game_state);
-		game_state* GameState = Memory->GameState;
-		
-		GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0, 0, 640 - 2*150, 480 - 2*150, Entity_Type_Player); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
-		entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
-
-		GameState->PlayerTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../brick_test.png", Image_Option_Premultiply);
-		PlayerEntity->ImageIndex = GameState->PlayerTextureIndex;
-		
-		GameState->ParticleTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../particle_high_res.png", Image_Option_None);
-		
-		PopulateWorld(GameState->Entities, &GameState->EntityCount);
-		
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // For premultiplied alpha
-		//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-		GameState->ProjLoc = glGetUniformLocation(*ShaderProgram, "ProjMatrix");
-		GameState->BrickLoc = glGetUniformLocation(*ShaderProgram, "BrickTexture");
-		GameState->ColourLoc = glGetUniformLocation(*ShaderProgram, "Colour");
-		GameState->LightPosLoc = glGetUniformLocation(*ShaderProgram, "LightPos");
-		GameState->LightColourLoc = glGetUniformLocation(*ShaderProgram, "LightColour");
-		GameState->LightRadiusLoc = glGetUniformLocation(*ShaderProgram, "LightRadius");
-		GameState->AmbientLoc = glGetUniformLocation(*ShaderProgram, "Ambient");
-		
-		//Background Texture
-		glGenTextures(1, &GameState->BackgroundTexture);
-		glBindTexture(GL_TEXTURE_2D, GameState->BackgroundTexture);
-		//glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-		uint8_t Alpha = 255;
-		float R = 50.0f / 255.0f;
-		float G = 50.0f / 255.0f;
-		float B = 50.0f / 255.0f;
-		float A = Alpha / 255.0f;
-		
-		R*= A;
-		G*= A;
-		B*= A;
-		
-		//Background Texture
-		uint8_t BGPixel[4] = {(uint8_t)(R * 255.0f + 0.5f), (uint8_t)(G * 255.0f + 0.5f), (uint8_t)(B * 255.0f + 0.5f), Alpha};
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, BGPixel);
-		
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		
-		//In case we sample outside of bounds by accident 
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		
-		
-		glGenTextures(1, &GameState->ParticleTexture);
-		glBindTexture(GL_TEXTURE_2D, GameState->ParticleTexture);
-		
-		Memory->IsGameStateInit = true;
+		InitGameState(Memory, ShaderProgram);
 	}
 	
 	float DT = 1.0f / 60.0f;
@@ -559,61 +610,19 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	glUniform4f(GameState->ColourLoc, 1.0f * TextureModAlpha, 0, 0, TextureModAlpha);
 	glUniform1i(GameState->BrickLoc, 0);
 	glBindTexture(GL_TEXTURE_2D, PlayerImage->TextureID);
-	//glDrawArrays(GL_TRIANGLES, 0, 6);
 	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
 	{
 		entity* CurrEntity = &GameState->Entities[EntityIndex];
 		
 		if(CurrEntity->Type == Entity_Type_Player)
 		{
-			//Rotate Around Center of Triangle instead of origin
-			float PivotX = CurrEntity->X + CurrEntity->Width * 0.5f; 
-			float PivotY = CurrEntity->Y + CurrEntity->Height* 0.5f;
-			
-			//Local coordinates, center is the middle of the triangle
-			v2 Left = {-0.5f*CurrEntity->Width, -0.5f*CurrEntity->Height};
-			v2 Right = {0.5f*CurrEntity->Width, -0.5f*CurrEntity->Height};
-			v2 Top = {0, 0.5f*CurrEntity->Height};
-			
-			float CosAngle = cosf(CurrEntity->Angle);
-			float SinAngle = sinf(CurrEntity->Angle);
-			
-			v2 LeftRotated = {PivotX + (Left.X * CosAngle - Left.Y * SinAngle), PivotY + (Left.X * SinAngle + Left.Y * CosAngle)};
-			v2 RightRotated = {PivotX + (Right.X * CosAngle - Right.Y * SinAngle), PivotY + (Right.X * SinAngle + Right.Y * CosAngle)};
-			v2 TopRotated = {PivotX + (Top.X * CosAngle - Top.Y * SinAngle), PivotY + (Top.X * SinAngle + Top.Y * CosAngle)};
-			
-			/*float Vertices[] = 
-			{
-				CurrEntity->X,                          CurrEntity->Y,                      0.0f, 0.0f,
-				CurrEntity->X + CurrEntity->Width,      CurrEntity->Y,                      1.0f, 0.0f,
-				CurrEntity->X + 0.5f*CurrEntity->Width, CurrEntity->Y + CurrEntity->Height, 0.5f, 1.0f,
-			};*/
-			float Vertices[] = 
-			{
-				LeftRotated.X,                          LeftRotated.Y,                      0.0f, 0.0f,
-				RightRotated.X,                         RightRotated.Y,                     1.0f, 0.0f,
-				TopRotated.X,                           TopRotated.Y,                       0.5f, 1.0f,
-			};
-			int VerticesSize = sizeof(Vertices);
-			
-			glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
+			SetAndUploadRotatedTraingleVertices(CurrEntity);
 			glDrawArrays(GL_TRIANGLES, 0, 3);
-			//glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
 		}
 		else if (CurrEntity->Type == Entity_Type_Other)
 		{
-			float Vertices[] = 
-			{
-			   CurrEntity->X + CurrEntity->Width,  CurrEntity->Y + CurrEntity->Height, 1.0f, 1.0f,//Top right
-			   CurrEntity->X,                 	   CurrEntity->Y + CurrEntity->Height, 0.0f, 1.0f,//Top left
-			   CurrEntity->X,                      CurrEntity->Y,                      0.0f, 0.0f,//Bottom left
-			   CurrEntity->X + CurrEntity->Width,  CurrEntity->Y,                      1.0f, 0.0f,//Bottom right
-
-			};
-			int VerticesSize = sizeof(Vertices);
-			
-			glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
+			SetAndUploadQuadVertices(CurrEntity);
 			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 		}
 	}
