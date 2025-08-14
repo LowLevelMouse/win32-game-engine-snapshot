@@ -520,7 +520,7 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
 	
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); 
-	glClearColor(0, 0, 0, 0);
+	glClearColor(1, 1, 1, 0);
 	glClear(GL_COLOR_BUFFER_BIT);
 	
 	glEnable(GL_FRAMEBUFFER_SRGB);
@@ -543,10 +543,10 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	
 	float BackgroundVertices[] =
 	{
-		CenterCameraX - HalfW, CenterCameraY - HalfH, 0.0f, 0.0f,
-		CenterCameraX + HalfW, CenterCameraY - HalfH, 1.0f, 0.0f,
-		CenterCameraX + HalfW, CenterCameraY + HalfH, 1.0f, 1.0f,
-		CenterCameraX - HalfW, CenterCameraY + HalfH, 0.0f, 1.0f,
+		Camera.X,                Camera.Y,                 0.0f, 0.0f,
+		Camera.X + Camera.Width, Camera.Y,                 1.0f, 0.0f,
+		Camera.X + Camera.Width, Camera.Y + Camera.Height, 1.0f, 1.0f,
+		Camera.X,                Camera.Y + Camera.Height, 0.0f, 1.0f,
 	};
 	
 	glBindVertexArray(*VAO);
