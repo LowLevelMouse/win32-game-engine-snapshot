@@ -135,6 +135,7 @@ image LoadImage(const char* Filename, image_option Option)
 	int Channels;
 	int ChanneslsForce = 4;
 	stbi_set_flip_vertically_on_load(1);
+	//Texture pixels are not stored CPU side
 	unsigned char* Data = stbi_load(Filename, &Image.Width, &Image.Height, &Channels, ChanneslsForce);
 	if(Data)
 	{
@@ -148,7 +149,6 @@ image LoadImage(const char* Filename, image_option Option)
 #endif
 		}
 		
-		//Image.Data = Data;
 		snprintf(Image.Filename, sizeof(Image.Filename), "%s", Filename);
 		Image.Format = GL_RGBA;
 		Image.Pitch = Image.Width * ChanneslsForce;
@@ -242,8 +242,6 @@ void PopulateWorld(entity* Entities, int* EntityCount)
 
 void InitGameState(memory* Memory, GLuint* ShaderProgram)
 {
-	//gladLoaderLoadGL();
-		
 	Memory->GameState = PushStruct(&Memory->PermanentMemory, game_state);
 	game_state* GameState = Memory->GameState;
 	
@@ -259,7 +257,6 @@ void InitGameState(memory* Memory, GLuint* ShaderProgram)
 	
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // For premultiplied alpha
-	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	GameState->ProjLoc = glGetUniformLocation(*ShaderProgram, "ProjMatrix");
 	GameState->BrickLoc = glGetUniformLocation(*ShaderProgram, "BrickTexture");
@@ -295,10 +292,6 @@ void InitGameState(memory* Memory, GLuint* ShaderProgram)
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	
-	
-	glGenTextures(1, &GameState->ParticleTexture);
-	glBindTexture(GL_TEXTURE_2D, GameState->ParticleTexture);
-	
 	Memory->IsGameStateInit = true;
 }
 
@@ -329,7 +322,36 @@ void OrthographicProjectionMatrix(float* ProjMatrix, float Left, float Bottom, f
 						  
 }
 
-void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* Input, entity* CollideEntity, int CollideEntityIndex)
+float RotateTowards(float Current, float Target, float MaxAngleDiff)
+{
+	float AngleDiff = Target - Current;
+	
+	//Make sure we use the shortest way there, AngleDiff can exceed Pi radians, we need to correct that
+	if(AngleDiff >  Pi32) 
+		AngleDiff -= 2.0f * Pi32;
+	if(AngleDiff <= -Pi32) // Open interval (-Pi32, Pi32]
+		AngleDiff += 2.0f * Pi32;
+	
+	//Make sure we don't exceed the amount we set per frame to rotate
+	if(AngleDiff >  MaxAngleDiff) 
+		AngleDiff =  MaxAngleDiff;
+	if(AngleDiff < -MaxAngleDiff) 
+		AngleDiff = -MaxAngleDiff;
+	
+	//Current + AngleDiff can also be > 180 degrees or <= -180 causing issues, so we wrap
+	//Example AngleDiff -170 - 160 = -330 -> Wraps to + 30
+	//Say Current = 160 NewAngle = 160 + 30 = 190 -> Problem!
+	float NewAngle = Current + AngleDiff;
+	if(NewAngle >  Pi32) 
+		NewAngle -= 2.0f * Pi32;
+	if(NewAngle < -Pi32) 
+		NewAngle += 2.0f * Pi32;
+	
+	return NewAngle;
+	
+}
+
+void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* Input, entity* CollideEntity, int CollideEntityIndex, float DT)
 {
 	float DX = 0.0f;
 	float DY = 0.0f;
@@ -351,6 +373,10 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 	{
 		DX /= Magnitude;
 		DY /= Magnitude;
+		
+		float TargetAngle = atan2f(DY, DX);
+		float TurnSpeed = 4.0f;
+		CollideEntity->Angle = RotateTowards(CollideEntity->Angle, TargetAngle, TurnSpeed * DT);
 	}
 	
 	CollideEntity->X += DX * Speed;
@@ -486,22 +512,22 @@ void SetAndUploadRotatedTraingleVertices(entity* CurrEntity)
 	float PivotY = CurrEntity->Y + CurrEntity->Height* 0.5f;
 
 	//Local coordinates, center is the middle of the triangle
-	v2 Left = {-0.5f*CurrEntity->Width, -0.5f*CurrEntity->Height};
-	v2 Right = {0.5f*CurrEntity->Width, -0.5f*CurrEntity->Height};
-	v2 Top = {0, 0.5f*CurrEntity->Height};
+	v2 Bottom = {-0.5f*CurrEntity->Width, -0.5f*CurrEntity->Height};
+	v2 Right = {0.5f*CurrEntity->Width, 0.0f};
+	v2 Top = {-0.5f*CurrEntity->Width, 0.5f*CurrEntity->Height};
 
 	float CosAngle = cosf(CurrEntity->Angle);
 	float SinAngle = sinf(CurrEntity->Angle);
 
-	v2 LeftRotated = {PivotX + (Left.X * CosAngle - Left.Y * SinAngle), PivotY + (Left.X * SinAngle + Left.Y * CosAngle)};
+	v2 BottomRotated = {PivotX + (Bottom.X * CosAngle - Bottom.Y * SinAngle), PivotY + (Bottom.X * SinAngle + Bottom.Y * CosAngle)};
 	v2 RightRotated = {PivotX + (Right.X * CosAngle - Right.Y * SinAngle), PivotY + (Right.X * SinAngle + Right.Y * CosAngle)};
 	v2 TopRotated = {PivotX + (Top.X * CosAngle - Top.Y * SinAngle), PivotY + (Top.X * SinAngle + Top.Y * CosAngle)};
 
 	float Vertices[] = 
 	{
-		LeftRotated.X,   LeftRotated.Y,  0.0f, 0.0f,
-		RightRotated.X,  RightRotated.Y, 1.0f, 0.0f,
-		TopRotated.X,    TopRotated.Y,   0.5f, 1.0f,
+		BottomRotated.X,   BottomRotated.Y,  0.0f, 0.0f,
+		RightRotated.X,    RightRotated.Y,   1.0f, 0.0f,
+		TopRotated.X,      TopRotated.Y,     0.0f, 1.0f,
 	};
 	int VerticesSize = sizeof(Vertices);
 
@@ -521,9 +547,9 @@ void SetAndUploadQuadVertices(entity* CurrEntity)
 	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(Vertices), Vertices);
 	
 }
+
 //UPDATE IMAGE LOAD FAILED CASE
 ///NEED TO MAKE TIMING ROBUST!!!
-
 void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram)
 {
 	
@@ -550,14 +576,14 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	
 	camera Camera = {CenterCameraX - HalfW, CenterCameraY - HalfH, CameraWidth, CameraHeight};
 	
-	MoveAndCollisionCheckGlobal(GameState, &Camera, Input, PlayerEntity, GameState->PlayerEntityIndex);
+	MoveAndCollisionCheckGlobal(GameState, &Camera, Input, PlayerEntity, GameState->PlayerEntityIndex, DT);
 	if(Input->IsDown[Button_Left])
 	{
-		PlayerEntity->Angle -= DT;
+		//PlayerEntity->Angle -= DT;
 	}
 	else if(Input->IsDown[Button_Right])
 	{
-		PlayerEntity->Angle += DT;
+		//PlayerEntity->Angle += DT;
 	}
 	
 	//if(Input->IsDown[Button_Space] && !Input->WasDown[Button_Space])
