@@ -361,7 +361,7 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 	bool Right = Input->WasDown[Button_Right];
 	bool Down = Input->WasDown[Button_Down];
 	
-	float Speed = 4.0f;
+	float Speed = 128.0f;
 	if(Right) DX = 1.0f;
 	if(Left) DX = -1.0f;
 	if(Up) DY = 1.0f;
@@ -379,8 +379,8 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 		CollideEntity->Angle = RotateTowards(CollideEntity->Angle, TargetAngle, TurnSpeed * DT);
 	}
 	
-	CollideEntity->X += DX * Speed;
-	Camera->X += DX * Speed;
+	CollideEntity->X += DX * Speed * DT;
+	Camera->X += DX * Speed * DT;
 	
 	const float Epsilon = 10.0f;
 	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
@@ -410,8 +410,8 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 		}
 	}
 	
-	CollideEntity->Y += DY * Speed;
-	Camera->Y += DY * Speed;
+	CollideEntity->Y += DY * Speed * DT;
+	Camera->Y += DY * Speed * DT;
 	
 	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
 	{
