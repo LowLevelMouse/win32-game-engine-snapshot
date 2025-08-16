@@ -1,31 +1,5 @@
-Collision Detection Problem AABB (Axis Aligned Bounding Box)
-
-void PopulateWorld(entity* Entities, int* EntityCount)
-{
-	float Width = 400;
-	float Height = 200;
-	float PadX = 300;
-	float PadY = 150;
-	
-	float XStart =  Width + 100;
-	float X = XStart;
-	float Y = 0;
-	
-	for(int EntityY = 0; EntityY < 10; EntityY++)
-	{
-		X = XStart;
-		for(int EntityX = 0; EntityX < 10; EntityX++)
-		{
-			AddEntity(Entities, EntityCount, X, Y, Width, Height);
-			
-			X+= Width + PadX;
-		}
-		
-		Y+= Height + PadY;
-	}
-}
-
-
+1.Collision Detection Problem AABB (Axis Aligned Bounding Box)
+Problem:
 We have a grid of rectangles which the distance between are too big for the player rectangle to get in between.
 Player Rectangle can get "stuck" right on a corner when grinding because it's redirecting the wrong axis, 
 putting an infinite loop of user pushes in, collision pushes the wrong axis back out, so you freeze and cant make any progress. Example grinding from below pushing up and left, freezes on a corner in the "left" rectangle if we
@@ -33,4 +7,14 @@ are grinding into two rectanlges from the bottom. The left rectangle in this cas
 which may also be causing the issue, if it collided with the right rectangle first it would work fine but that may 
 be too uncertain.
 
+Solution:
 Resolving one axis at a time solves this issue
+
+
+2. When dealing with rotation, we need to wrap TWICE to make sure our resulting angle isnt > 180 degrees or <= -180. We wrap the AngleDiff and then we also wrap AngleDiff + Current because that could also exceed 180. For example AngleDiff = -170 - 160 = -330 -> Wraps to + 30. Say Current = 160 NewAngle = 160 + 30 = 190 -> Problem!
+
+3. While controlling the player, when you let go of say for example up and left, at least one of them is left briefly still pressed down before you release both and it causes a jitter artifact. You aren't left pointing in the exact direction you previously were
+
+4. Gliding against walls, we stop velocity on the axis that you bonk into, and cap the other axis to a minnimum, is that fine?
+
+5. Should facing direction be determined by the acceleration or velocity?

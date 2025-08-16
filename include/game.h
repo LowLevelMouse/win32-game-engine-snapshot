@@ -15,6 +15,14 @@
 #define IMAGES_MAX 2
 
 #define MAX_PARTICLES 2048
+
+struct v2
+{
+	float X;
+	float Y;
+};
+
+
 struct particle
 {
 	float X, Y;
@@ -68,6 +76,7 @@ struct entity
 
 	float X, Y;
 	float Width, Height;
+	v2 Velocity;
 	float ScaleX, ScaleY;
 	float Angle;
 	collision Collision;
@@ -112,12 +121,6 @@ struct camera
 {
 	float X, Y; //Left Bottom
 	float Width, Height;
-};
-
-struct v2
-{
-	float X;
-	float Y;
 };
 
 #endif

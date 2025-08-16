@@ -245,7 +245,7 @@ void InitGameState(memory* Memory, GLuint* ShaderProgram)
 	Memory->GameState = PushStruct(&Memory->PermanentMemory, game_state);
 	game_state* GameState = Memory->GameState;
 	
-	GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0, 0, 640 - 2*150, 480 - 2*150, Entity_Type_Player); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
+	GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0, 0, 480 - 2*150, 480 - 2*150, Entity_Type_Player); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
 	entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
 
 	GameState->PlayerTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../brick_test.png", Image_Option_Premultiply);
@@ -353,36 +353,61 @@ float RotateTowards(float Current, float Target, float MaxAngleDiff)
 
 void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* Input, entity* CollideEntity, int CollideEntityIndex, float DT)
 {
-	float DX = 0.0f;
-	float DY = 0.0f;
-	
 	bool Left = Input->WasDown[Button_Left];
 	bool Up = Input->WasDown[Button_Up];
 	bool Right = Input->WasDown[Button_Right];
 	bool Down = Input->WasDown[Button_Down];
 	
-	float Speed = 128.0f;
-	if(Right) DX = 1.0f;
-	if(Left) DX = -1.0f;
-	if(Up) DY = 1.0f;
-	if(Down) DY = -1.0f;
+	v2* Velocity = &CollideEntity->Velocity;
+	v2 Accel = {};
+
+	if(Right) Accel.X = 1.0f;
+	if(Left) Accel.X = -1.0f;
+	if(Up) Accel.Y = 1.0f;
+	if(Down) Accel.Y = -1.0f;
 	
 
-	float Magnitude = sqrtf(DX * DX + DY * DY);
+	float AccelRate = 64.0f;
+	float Magnitude = sqrtf(Accel.X * Accel.X + Accel.Y * Accel.Y);
 	if(Magnitude > 0.0f)
 	{
-		DX /= Magnitude;
-		DY /= Magnitude;
+		Accel.X /= Magnitude;
+		Accel.Y /= Magnitude;
 		
-		float TargetAngle = atan2f(DY, DX);
+		Velocity->X += Accel.X * AccelRate * DT;
+		Velocity->Y += Accel.Y * AccelRate * DT;
+		
+		float TargetAngle = atan2f(Accel.Y, Accel.X);
 		float TurnSpeed = 4.0f;
 		CollideEntity->Angle = RotateTowards(CollideEntity->Angle, TargetAngle, TurnSpeed * DT);
 	}
+	else
+	{
+		float Drag = 0.99f;
+		Velocity->X *= Drag;
+		Velocity->Y *= Drag;
+	}
 	
-	CollideEntity->X += DX * Speed * DT;
-	Camera->X += DX * Speed * DT;
+	if(Velocity->X > 200.0f)
+		Velocity->X = 200.0f;
+	if(Velocity->X < -200.0f)
+		Velocity->X = -200.0f;
+	if(Velocity->Y > 200.0f)
+		Velocity->Y = 200.0f;
+	if(Velocity->Y < -200.0f)
+		Velocity->Y = -200.0f;
+	
+	
+	if(Velocity->X != 0.0f || Velocity->Y != 0.0f)
+	{
+
+	}
+	
+	CollideEntity->X += Velocity->X * DT;
+	Camera->X += Velocity->X * DT;
 	
 	const float Epsilon = 10.0f;
+	const float GlideSpeed = 100.f;
 	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
 	{
 		entity* TestEntity = &GameState->Entities[EntityIndex];
@@ -393,25 +418,28 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 			if(Collided)
 			{
 				float OverlapX = 0;
-				if(DX > 0)
+				if(Velocity->X > 0)
 				{
 					OverlapX = ((CollideEntity->X + CollideEntity->Width) - TestEntity->X);//Right Side Hit
 					CollideEntity->X -= (OverlapX + Epsilon);
 					Camera->X -= (OverlapX + Epsilon);
 				}
-				else if (DX < 0)
+				else if (Velocity->X < 0)
 				{
 					OverlapX = ((TestEntity->X + TestEntity->Width) - CollideEntity->X);//Left Side Hit
 					CollideEntity->X += (OverlapX + Epsilon);
 					Camera->X += (OverlapX + Epsilon);
 				}
+				Velocity->X = 0;
+				if(Velocity->Y > GlideSpeed)
+					Velocity->Y = GlideSpeed;
 			}
 			
 		}
 	}
 	
-	CollideEntity->Y += DY * Speed * DT;
-	Camera->Y += DY * Speed * DT;
+	CollideEntity->Y += Velocity->Y * DT;
+	Camera->Y += Velocity->Y * DT;
 	
 	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
 	{
@@ -425,18 +453,21 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 			if(Collided)
 			{
 				float OverlapY = 0;
-				if(DY > 0)
+				if(Velocity->Y > 0)
 				{
 					OverlapY = ((CollideEntity->Y + CollideEntity->Height) - TestEntity->Y); //Right Side Hit
 					CollideEntity->Y -= (OverlapY + Epsilon);
 					Camera->Y -= (OverlapY + Epsilon);
 				}
-				else if (DY < 0)
+				else if (Velocity->Y < 0)
 				{
 					OverlapY = ((TestEntity->Y + TestEntity->Height) - CollideEntity->Y);//Left Side Hit
 					CollideEntity->Y += (OverlapY + Epsilon);
 					Camera->Y += (OverlapY + Epsilon);
 				}
+				Velocity->Y = 0;
+				if(Velocity->X > GlideSpeed)
+					Velocity->X = GlideSpeed;
 			}
 			
 		}
