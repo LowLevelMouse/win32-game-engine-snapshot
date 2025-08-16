@@ -34,8 +34,6 @@
 
 #define Check(Expression) do { if(!(Expression)) {return -1;} } while(0)
 
-	
-#define Pi32 3.1415927f
 
 #define Kilobytes(Value) ((Value) * 1024ULL)
 #define Megabytes(Value) ((Value) * 1024ULL * 1024ULL)

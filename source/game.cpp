@@ -377,6 +377,10 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 		Velocity->X += Accel.X * AccelRate * DT;
 		Velocity->Y += Accel.Y * AccelRate * DT;
 		
+		if(Input->WasDown[Button_Left] &&  !Input->IsDown[Button_Left] && Input->IsDown[Button_Up])
+			Accel.Y = 0;
+		if(Input->WasDown[Button_Up] &&  !Input->IsDown[Button_Up] && Input->IsDown[Button_Left])
+			Accel.X = 0;
 		float TargetAngle = atan2f(Accel.Y, Accel.X);
 		float TurnSpeed = 4.0f;
 		CollideEntity->Angle = RotateTowards(CollideEntity->Angle, TargetAngle, TurnSpeed * DT);
@@ -433,6 +437,8 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 				Velocity->X = 0;
 				if(Velocity->Y > GlideSpeed)
 					Velocity->Y = GlideSpeed;
+				if(Velocity->Y < -GlideSpeed)
+					Velocity->Y = -GlideSpeed;
 			}
 			
 		}
@@ -468,6 +474,9 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 				Velocity->Y = 0;
 				if(Velocity->X > GlideSpeed)
 					Velocity->X = GlideSpeed;
+				if(Velocity->X < -GlideSpeed)
+					Velocity->X = -GlideSpeed;
+				
 			}
 			
 		}
@@ -501,16 +510,20 @@ void UpdateParticles(particle_system* ParticleSystem, float DT)
 {
 	for(int ParticleIndex = 0; ParticleIndex < MAX_PARTICLES; ParticleIndex++)
 	{
-		float Speed = 60.0f;
 		particle* Particle = &ParticleSystem->Particles[ParticleIndex];
-		Particle->X += Particle->VX * DT * Speed; 
-		Particle->Y += Particle->VY * DT * Speed;
-		Particle->Life -= DT;
-		Particle->A = Particle->Life / Particle->MaxLife;
-		Particle->Size *= 0.98f;
-		if(Particle->Life <= 0.0f)
+		if(Particle->Active)
 		{
-			Particle->Active = false;
+			float Speed = 60.0f;
+
+			Particle->X += Particle->VX * DT * Speed; 
+			Particle->Y += Particle->VY * DT * Speed;
+			Particle->Life -= DT;
+			Particle->A = Particle->Life / Particle->MaxLife;
+			Particle->Size *= 0.98f;
+			if(Particle->Life <= 0.0f)
+			{
+				Particle->Active = false;
+			}
 		}
 	}
 }
@@ -536,7 +549,7 @@ v2 RadialEmission(float MaxRadius)
 	return Offset;
 }
 
-void SetAndUploadRotatedTraingleVertices(entity* CurrEntity)
+triangle SetAndUploadRotatedTraingleVertices(entity* CurrEntity)
 {
 	//Rotate Around Center of Triangle instead of origin
 	float PivotX = CurrEntity->X + CurrEntity->Width * 0.5f; 
@@ -563,6 +576,9 @@ void SetAndUploadRotatedTraingleVertices(entity* CurrEntity)
 	int VerticesSize = sizeof(Vertices);
 
 	glBufferSubData(GL_ARRAY_BUFFER, 0, VerticesSize, Vertices);
+	
+	triangle Triangle = {RightRotated, BottomRotated, TopRotated};
+	return Triangle;
 }
 
 void SetAndUploadQuadVertices(entity* CurrEntity)
@@ -620,8 +636,7 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	//if(Input->IsDown[Button_Space] && !Input->WasDown[Button_Space])
 	if(Input->IsDown[Button_Space])
 	{
-		v2 Offset = RadialEmission(2.5f);
-		EmitParticle(&GameState->ParticleSystem, PlayerEntity->X + Offset.X , PlayerEntity->Y + Offset.Y);
+
 	}
 	
 	float ProjMatrix[16];
@@ -673,8 +688,12 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		
 		if(CurrEntity->Type == Entity_Type_Player)
 		{
-			SetAndUploadRotatedTraingleVertices(CurrEntity);
+			triangle Triangle = SetAndUploadRotatedTraingleVertices(CurrEntity);
 			glDrawArrays(GL_TRIANGLES, 0, 3);
+			
+			v2 Offset = RadialEmission(2.5f);
+		    EmitParticle(&GameState->ParticleSystem, Triangle.CCW.X + Offset.X , Triangle.CCW.Y + Offset.Y);
+			EmitParticle(&GameState->ParticleSystem, Triangle.CW.X + Offset.X , Triangle.CW.Y + Offset.Y);
 
 		}
 		else if (CurrEntity->Type == Entity_Type_Other)
@@ -693,12 +712,13 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		if(Particle->Active)
 		{
 			float Size = Particle->Size;
+			float HalfSize = 0.5f * Size;
 			float Vertices[] = 
 			{
-				Particle->X + Size, Particle->Y + Size, 1.0f, 1.0f,//Top right
-				Particle->X,        Particle->Y + Size, 0.0f, 1.0f,//Top left
-				Particle->X,        Particle->Y,        0.0f, 0.0f,//Bottom left
-				Particle->X + Size, Particle->Y,        1.0f, 0.0f,//Bottom right
+				Particle->X + HalfSize, Particle->Y + HalfSize, 1.0f, 1.0f,//Top right
+				Particle->X - HalfSize, Particle->Y + HalfSize, 0.0f, 1.0f,//Top left
+				Particle->X - HalfSize, Particle->Y - HalfSize, 0.0f, 0.0f,//Bottom left
+				Particle->X + HalfSize, Particle->Y - HalfSize, 1.0f, 0.0f,//Bottom right
 			};
 			int VerticesSize = sizeof(Vertices);
 			

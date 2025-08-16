@@ -116,11 +116,18 @@ struct game_state
 	
 };
 
-
 struct camera
 {
 	float X, Y; //Left Bottom
 	float Width, Height;
 };
+
+struct triangle
+{
+	v2 Top;
+	v2 CW;
+	v2 CCW;	
+};
+
 
 #endif
