@@ -377,10 +377,6 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 		Velocity->X += Accel.X * AccelRate * DT;
 		Velocity->Y += Accel.Y * AccelRate * DT;
 		
-		if(Input->WasDown[Button_Left] &&  !Input->IsDown[Button_Left] && Input->IsDown[Button_Up])
-			Accel.Y = 0;
-		if(Input->WasDown[Button_Up] &&  !Input->IsDown[Button_Up] && Input->IsDown[Button_Left])
-			Accel.X = 0;
 		float TargetAngle = atan2f(Accel.Y, Accel.X);
 		float TurnSpeed = 4.0f;
 		CollideEntity->Angle = RotateTowards(CollideEntity->Angle, TargetAngle, TurnSpeed * DT);
