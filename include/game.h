@@ -73,7 +73,10 @@ struct image
 
 struct entity
 {
-
+	v2 LastAccel;
+	v2 LastAccelInput;
+	float HoldTime;
+	
 	float X, Y;
 	float Width, Height;
 	v2 Velocity;

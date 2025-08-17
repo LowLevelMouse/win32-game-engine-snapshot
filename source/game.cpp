@@ -353,40 +353,61 @@ float RotateTowards(float Current, float Target, float MaxAngleDiff)
 
 void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* Input, entity* CollideEntity, int CollideEntityIndex, float DT)
 {
-	bool Left = Input->WasDown[Button_Left];
-	bool Up = Input->WasDown[Button_Up];
-	bool Right = Input->WasDown[Button_Right];
-	bool Down = Input->WasDown[Button_Down];
+	bool Left = Input->IsDown[Button_Left];
+	bool Up = Input->IsDown[Button_Up];
+	bool Right = Input->IsDown[Button_Right];
+	bool Down = Input->IsDown[Button_Down];
 	
-	v2* Velocity = &CollideEntity->Velocity;
-	v2 Accel = {};
-
-	if(Right) Accel.X = 1.0f;
-	if(Left) Accel.X = -1.0f;
-	if(Up) Accel.Y = 1.0f;
-	if(Down) Accel.Y = -1.0f;
+	v2 AccelInput = {(float)Right - (float)Left, (float)Up - (float)Down};
 	
-
-	float AccelRate = 64.0f;
-	float Magnitude = sqrtf(Accel.X * Accel.X + Accel.Y * Accel.Y);
-	if(Magnitude > 0.0f)
+	//Normalize so diagonals don't go faster, square input -> circle input
+	if(AccelInput.X != 0 || AccelInput.Y != 0)
 	{
-		Accel.X /= Magnitude;
-		Accel.Y /= Magnitude;
-		
-		Velocity->X += Accel.X * AccelRate * DT;
-		Velocity->Y += Accel.Y * AccelRate * DT;
-		
-		float TargetAngle = atan2f(Accel.Y, Accel.X);
-		float TurnSpeed = 4.0f;
-		CollideEntity->Angle = RotateTowards(CollideEntity->Angle, TargetAngle, TurnSpeed * DT);
+		float Magnitude = sqrtf(AccelInput.X * AccelInput.X + AccelInput.Y * AccelInput.Y);
+		AccelInput.X /= Magnitude;
+		AccelInput.Y /= Magnitude;
+	}
+	
+	//Do we need a change threshold here to not count very small movements, can that be an issue on keyboard
+	if((AccelInput.X != CollideEntity->LastAccelInput.X) || (AccelInput.Y != CollideEntity->LastAccelInput.Y))
+	{
+		CollideEntity->LastAccelInput = AccelInput;
+		CollideEntity->HoldTime = 0.0f;
 	}
 	else
 	{
-		float Drag = 0.99f;
-		Velocity->X *= Drag;
-		Velocity->Y *= Drag;
+		CollideEntity->HoldTime += DT;
 	}
+	
+	const float AcceptThreshold = 0.1f;
+	v2 Accel = {};
+	
+	if((CollideEntity->HoldTime >= AcceptThreshold) && (AccelInput.X != 0 || AccelInput.Y != 0))
+	{
+		Accel = AccelInput;
+		CollideEntity->LastAccel = AccelInput;
+	}
+	
+	//if(CollideEntity->LastAccel.X || CollideEntity->LastAccel.Y)
+	{
+		float TargetAngle = atan2f(CollideEntity->LastAccel.Y, CollideEntity->LastAccel.X);
+		float TurnSpeed = 4.0f;
+		CollideEntity->Angle = RotateTowards(CollideEntity->Angle, TargetAngle, TurnSpeed * DT);
+	}
+	
+	v2* Velocity = &CollideEntity->Velocity;
+		
+	float AccelRate = 64.0f;	
+	Velocity->X += Accel.X * AccelRate * DT;
+	Velocity->Y += Accel.Y * AccelRate * DT;
+	
+	
+	
+	
+	
+	float Drag = 0.99f;
+	Velocity->X *= Drag;
+	Velocity->Y *= Drag;
 	
 	if(Velocity->X > 200.0f)
 		Velocity->X = 200.0f;
@@ -396,12 +417,6 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 		Velocity->Y = 200.0f;
 	if(Velocity->Y < -200.0f)
 		Velocity->Y = -200.0f;
-	
-	
-	if(Velocity->X != 0.0f || Velocity->Y != 0.0f)
-	{
-
-	}
 	
 	CollideEntity->X += Velocity->X * DT;
 	Camera->X += Velocity->X * DT;
