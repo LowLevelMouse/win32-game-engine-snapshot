@@ -11,10 +11,12 @@ Solution:
 Resolving one axis at a time solves this issue
 
 
-2. When dealing with rotation, we need to wrap TWICE to make sure our resulting angle isnt > 180 degrees or <= -180. We wrap the AngleDiff and then we also wrap AngleDiff + Current because that could also exceed 180. For example AngleDiff = -170 - 160 = -330 -> Wraps to + 30. Say Current = 160 NewAngle = 160 + 30 = 190 -> Problem!
+3.When you release a diagonal movement it "snaps" because for a brief moment you still have one key pressed. We added a timer to the code so that the rotation only starts if the key has been held for a certain amount of time. Seems to be the least cruft solution.
 
-3. While controlling the player, when you let go of say for example up and left, at least one of them is left briefly still pressed down before you release both and it causes a jitter artifact. You aren't left pointing in the exact direction you previously were
+4. When dealing with rotation, we need to wrap TWICE to make sure our resulting angle isnt > 180 degrees or <= -180. We wrap the AngleDiff and then we also wrap AngleDiff + Current because that could also exceed 180. For example AngleDiff = -170 - 160 = -330 -> Wraps to + 30. Say Current = 160 NewAngle = 160 + 30 = 190 -> Problem!
 
-4. Gliding against walls, we stop velocity on the axis that you bonk into, and cap the other axis to a minnimum, is that fine?
+5. While controlling the player, when you let go of say for example up and left, at least one of them is left briefly still pressed down before you release both and it causes a jitter artifact. You aren't left pointing in the exact direction you previously were
 
-5. Should facing direction be determined by the acceleration or velocity?
+6. Gliding against walls, we stop velocity on the axis that you bonk into, and cap the other axis to a minnimum, is that fine?
+
+7. Should facing direction be determined by the acceleration or velocity?
