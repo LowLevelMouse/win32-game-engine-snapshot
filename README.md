@@ -8,6 +8,11 @@ Run the `build.bat` file in the project root, then execute `win32.exe`.
 
 ---
 
+## How to Play
+Use the arrow keys to move the triangle player around
+
+---
+
 ## Features
 
 - Creates a basic Win32 window with a message pump and callback handler
