@@ -203,6 +203,17 @@ int AddEntity(entity* Entities, int* EntityCount, float X, float Y, float Width,
 	return EntityIndex;
 }
 
+int AddNpc(game_state* GameState, entity* Entities, int* EntityCount, float X, float Y, float Width, float Height, entity_type Type)
+{
+	int NpcIndex = AddEntity(Entities, EntityCount, X, Y, Width, Height, Type);
+	entity* Npc = &GameState->Entities[NpcIndex];
+	Npc->PathingTimerMax = 3.0f;
+	Npc->PathingTimer = Npc->PathingTimerMax;
+	Npc->Velocity = {1.0f, 1.0f};
+	GameState->NpcCount++;
+	return NpcIndex;
+}
+
 int AddImage(image* Images, int* ImageCount, char* Filename, image_option Options)
 {
 	int ImageIndex = *ImageCount;
@@ -245,11 +256,17 @@ void InitGameState(memory* Memory, GLuint* ShaderProgram)
 	Memory->GameState = PushStruct(&Memory->PermanentMemory, game_state);
 	game_state* GameState = Memory->GameState;
 	
-	GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0, 0, 480 - 2*150, 480 - 2*150, Entity_Type_Player); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
+	float PlayerWidth = 480 - 2*150;
+	float PlayerHeight = PlayerWidth;
+	GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0, 0, PlayerWidth, PlayerHeight, Entity_Type_Player); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
 	entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
 
 	GameState->PlayerTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../brick_test.png", Image_Option_Premultiply);
 	PlayerEntity->ImageIndex = GameState->PlayerTextureIndex;
+	
+	GameState->NpcEntityIndex[0]= AddNpc(GameState, GameState->Entities, &GameState->EntityCount, -PlayerWidth - 20.0f, 0, PlayerWidth, PlayerHeight, Entity_Type_Player);
+	GameState->NpcEntityIndex[1]= AddNpc(GameState,GameState->Entities, &GameState->EntityCount, 0, -PlayerHeight - 20.0f, PlayerWidth, PlayerHeight, Entity_Type_Player);
+	GameState->NpcEntityIndex[2]= AddNpc(GameState, GameState->Entities, &GameState->EntityCount, -PlayerWidth - 20.0f, -PlayerHeight - 20.0f, PlayerWidth, PlayerHeight, Entity_Type_Player);
 	
 	GameState->ParticleTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../particle_high_res.png", Image_Option_None);
 	
@@ -351,7 +368,82 @@ float RotateTowards(float Current, float Target, float MaxAngleDiff)
 	
 }
 
-void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* Input, entity* CollideEntity, int CollideEntityIndex, float DT)
+void MoveAndCorrectCollision(game_state* GameState, entity* CollideEntity, camera* Camera, float Epsilon, float GlideSpeed, float DT, is_player IsPlayer)
+{
+	v2* Velocity = &CollideEntity->Velocity;
+	
+	CollideEntity->X += Velocity->X * DT;
+	if(IsPlayer) Camera->X += Velocity->X * DT;
+	
+	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
+	{
+		entity* TestEntity = &GameState->Entities[EntityIndex];
+		if(EntityIndex != CollideEntity->Index)
+		{
+			bool Collided = CollisionCheckPair(Epsilon, CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
+			
+			if(Collided)
+			{
+				float OverlapX = 0;
+				if(Velocity->X > 0)
+				{
+					OverlapX = ((CollideEntity->X + CollideEntity->Width) - TestEntity->X);//Right Side Hit
+					CollideEntity->X -= (OverlapX + Epsilon);
+					if(IsPlayer) Camera->X -= (OverlapX + Epsilon);
+				}
+				else if (Velocity->X < 0)
+				{
+					OverlapX = ((TestEntity->X + TestEntity->Width) - CollideEntity->X);//Left Side Hit
+					CollideEntity->X += (OverlapX + Epsilon);
+					if(IsPlayer) Camera->X += (OverlapX + Epsilon);
+				}
+				Velocity->X = 0;
+				if(Velocity->Y > GlideSpeed)  Velocity->Y = GlideSpeed;
+				if(Velocity->Y < -GlideSpeed) Velocity->Y = -GlideSpeed;
+			}
+			
+		}
+	}
+	
+	CollideEntity->Y += Velocity->Y * DT;
+	if(IsPlayer) Camera->Y += Velocity->Y * DT;
+	
+	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
+	{
+		entity* TestEntity = &GameState->Entities[EntityIndex];
+		if(EntityIndex != CollideEntity->Index)
+		{
+
+					
+			bool Collided = CollisionCheckPair(Epsilon, CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
+			
+			if(Collided)
+			{
+				float OverlapY = 0;
+				if(Velocity->Y > 0)
+				{
+					OverlapY = ((CollideEntity->Y + CollideEntity->Height) - TestEntity->Y); //Top Side Hit
+					CollideEntity->Y -= (OverlapY + Epsilon);
+					if(IsPlayer) Camera->Y -= (OverlapY + Epsilon);
+				}
+				else if (Velocity->Y < 0)
+				{
+					OverlapY = ((TestEntity->Y + TestEntity->Height) - CollideEntity->Y);//Bottom Side Hit
+					CollideEntity->Y += (OverlapY + Epsilon);
+					if(IsPlayer) Camera->Y += (OverlapY + Epsilon);
+				}
+				Velocity->Y = 0;
+				if(Velocity->X > GlideSpeed)  Velocity->X = GlideSpeed;
+				if(Velocity->X < -GlideSpeed) Velocity->X = -GlideSpeed;
+				
+			}
+			
+		}
+	}
+	
+}
+
+void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* Input, entity* CollideEntity, float DT)
 {
 	//Unify input check and appropriate vector in one go
 	v2 AccelInput = {(float)Input->IsDown[Button_Right] - (float)Input->IsDown[Button_Left],
@@ -381,12 +473,14 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 
 	float AcceptThreshold = 0.1f;
 
-	//If we are at or above the threshold and are still trying to move we can finally let the angle change
+	//If we aren't moving we need to 0 out LastAccel since our velcoity is based off that
 	if((AccelInput.X == 0) && (AccelInput.Y == 0)) 
 	{
 		v2 Accel = {};
 		CollideEntity->LastAccel = Accel;
 	}
+	//If we are at or above the threshold and are still trying to move we can finally let the angle change
+	//and apply the new acceleration
 	else if((CollideEntity->HoldTime >= AcceptThreshold))
 	{
 		CollideEntity->LastAccel = AccelInput;
@@ -397,7 +491,7 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 
 	v2* Velocity = &CollideEntity->Velocity;
 		
-	float AccelRate = 64.0f;	
+	float AccelRate = 128.0f;	
 	Velocity->X += CollideEntity->LastAccel.X * AccelRate * DT;
 	Velocity->Y += CollideEntity->LastAccel.Y * AccelRate * DT;
 	
@@ -410,79 +504,34 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, camera* Camera, input* I
 	if(Velocity->Y > 200.0f)  Velocity->Y = 200.0f;
 	if(Velocity->Y < -200.0f) Velocity->Y = -200.0f;
 	
-	CollideEntity->X += Velocity->X * DT;
-	Camera->X += Velocity->X * DT;
-	
-	const float Epsilon = 10.0f;
-	const float GlideSpeed = 100.f;
-	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
-	{
-		entity* TestEntity = &GameState->Entities[EntityIndex];
-		if(EntityIndex != CollideEntityIndex)
-		{
-			bool Collided = CollisionCheckPair(Epsilon, CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
-			
-			if(Collided)
-			{
-				float OverlapX = 0;
-				if(Velocity->X > 0)
-				{
-					OverlapX = ((CollideEntity->X + CollideEntity->Width) - TestEntity->X);//Right Side Hit
-					CollideEntity->X -= (OverlapX + Epsilon);
-					Camera->X -= (OverlapX + Epsilon);
-				}
-				else if (Velocity->X < 0)
-				{
-					OverlapX = ((TestEntity->X + TestEntity->Width) - CollideEntity->X);//Left Side Hit
-					CollideEntity->X += (OverlapX + Epsilon);
-					Camera->X += (OverlapX + Epsilon);
-				}
-				Velocity->X = 0;
-				if(Velocity->Y > GlideSpeed)
-					Velocity->Y = GlideSpeed;
-				if(Velocity->Y < -GlideSpeed)
-					Velocity->Y = -GlideSpeed;
-			}
-			
-		}
-	}
-	
-	CollideEntity->Y += Velocity->Y * DT;
-	Camera->Y += Velocity->Y * DT;
-	
-	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
-	{
-		entity* TestEntity = &GameState->Entities[EntityIndex];
-		if(EntityIndex != CollideEntityIndex)
-		{
+	float Epsilon = 10.0f;
+	float GlideSpeed = 100.0f;
+	MoveAndCorrectCollision(GameState, CollideEntity, Camera, Epsilon, GlideSpeed, DT, Is_Player_Yes);
+}
 
-					
-			bool Collided = CollisionCheckPair(Epsilon, CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
-			
-			if(Collided)
-			{
-				float OverlapY = 0;
-				if(Velocity->Y > 0)
-				{
-					OverlapY = ((CollideEntity->Y + CollideEntity->Height) - TestEntity->Y); //Right Side Hit
-					CollideEntity->Y -= (OverlapY + Epsilon);
-					Camera->Y -= (OverlapY + Epsilon);
-				}
-				else if (Velocity->Y < 0)
-				{
-					OverlapY = ((TestEntity->Y + TestEntity->Height) - CollideEntity->Y);//Left Side Hit
-					CollideEntity->Y += (OverlapY + Epsilon);
-					Camera->Y += (OverlapY + Epsilon);
-				}
-				Velocity->Y = 0;
-				if(Velocity->X > GlideSpeed)
-					Velocity->X = GlideSpeed;
-				if(Velocity->X < -GlideSpeed)
-					Velocity->X = -GlideSpeed;
-				
-			}
-			
+void NpcMoveAndCollisionCheck(game_state* GameState, float DT)
+{
+	float Speed = 60.0f;
+	for(int NpcIndexIndex = 0; NpcIndexIndex < GameState->NpcCount; NpcIndexIndex++)
+	{
+		int NpcIndex = GameState->NpcEntityIndex[NpcIndexIndex];
+		entity* Npc = &GameState->Entities[NpcIndex];
+		if(Npc->PathingTimer <= 0.0f)
+		{
+			//Npc->Velocity = { (float)((rand() % 3) - 1), (float)((rand() % 3) - 1) };
+			Npc->Velocity = {1, 0};
+			Npc->PathingTimer = Npc->PathingTimerMax;
 		}
+		else
+		{
+			Npc->X += Npc->Velocity.X * Speed * DT;
+			Npc->Y += Npc->Velocity.Y * Speed * DT;
+			Npc->PathingTimer -= DT;
+		}
+		
+		float Epsilon = 10.0f;
+		float GlideSpeed = 100.0f;
+		MoveAndCorrectCollision(GameState, Npc, 0,  Epsilon, GlideSpeed, DT, Is_Player_No);
 	}
 }
 
@@ -626,7 +675,8 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	
 	camera Camera = {CenterCameraX - HalfW, CenterCameraY - HalfH, CameraWidth, CameraHeight};
 	
-	MoveAndCollisionCheckGlobal(GameState, &Camera, Input, PlayerEntity, GameState->PlayerEntityIndex, DT);
+	MoveAndCollisionCheckGlobal(GameState, &Camera, Input, PlayerEntity, DT);
+	NpcMoveAndCollisionCheck(GameState, DT);
 	if(Input->IsDown[Button_Left])
 	{
 		//PlayerEntity->Angle -= DT;

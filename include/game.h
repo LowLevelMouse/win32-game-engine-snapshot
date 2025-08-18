@@ -57,7 +57,14 @@ enum entity_type
 {
 	Entity_Type_None,
 	Entity_Type_Player,
+	Entity_Type_Npc,
 	Entity_Type_Other,
+};
+
+enum is_player
+{
+	Is_Player_No,
+	Is_Player_Yes,
 };
 
 struct image
@@ -88,6 +95,9 @@ struct entity
 	int Index;
 	
 	entity_type Type;
+	
+	float PathingTimer;
+	float PathingTimerMax;
 };
 
 struct game_state
@@ -100,6 +110,10 @@ struct game_state
 	int PlayerTextureIndex;
 	int ParticleTextureIndex;
 	bool IsInit;
+	
+	
+	int NpcEntityIndex[3];
+	int NpcCount;
 	
 	GLuint BackgroundTexture;
 	GLuint ParticleTexture;
