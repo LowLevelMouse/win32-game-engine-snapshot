@@ -1,4 +1,4 @@
-1.Collision Detection Problem AABB (Axis Aligned Bounding Box)
+1.Collision Detection Problems AABB (Axis Aligned Bounding Box)
 Problem:
 We have a grid of rectangles which the distance between are too big for the player rectangle to get in between.
 Player Rectangle can get "stuck" right on a corner when grinding because it's redirecting the wrong axis, 
@@ -8,7 +8,7 @@ which may also be causing the issue, if it collided with the right rectangle fir
 be too uncertain.
 
 Solution:
-Resolving one axis at a time solves this issue
+Resolving one axis at a time solves this issue but this also breaks sliding into another moving entity. It causes us to teleport when we are sliding into the edge of another moving entity. We use a hybrid approach. We do per-axis movement, but Minimum Translation Vector resoloution instead of per-axis. So MoveX -> Resolve alll axes -> MoveY ->Resolve all axes
 
 
 3.When you release a diagonal movement it "snaps" because for a brief moment you still have one key pressed. We added a timer to the code so that the rotation only starts if the key has been held for a certain amount of time. Seems to be the least cruft solution.

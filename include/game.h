@@ -11,6 +11,7 @@
 
 #include "shared.h"
 
+#define MAX_OVERLAPS 4
 #define ENTITY_MAX 1000
 #define IMAGES_MAX 2
 
