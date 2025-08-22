@@ -284,7 +284,7 @@ void InitGameState(memory* Memory, GLuint* ShaderProgram)
 	
 	float PlayerWidth = 640 - 2*150;
 	float PlayerHeight = 480 - 2*150;
-	GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0, 0, PlayerWidth, PlayerHeight, Entity_Type_Player); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
+	GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0.0f, 0.0f, PlayerWidth, PlayerHeight, Entity_Type_Player); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
 	entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
 
 	GameState->PlayerTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../brick_test.png", Image_Option_Premultiply);
@@ -396,153 +396,119 @@ float RotateTowards(float Current, float Target, float MaxAngleDiff)
 
 void ResolveCollision(game_state* GameState, entity* CollideEntity, v2 InitialP, float Epsilon, float GlideSpeed)
 {
-	(void)GlideSpeed;
-	(void)InitialP;
 	
-	float Adjustment[2] = {-1, -1};
-	int OverlapMinIndex[2] = {-1, -1};
-	bool CantBeX = false;
-	bool CantBeY = false;
-	for(int Pass = 0; Pass < 3; Pass++)
+	const int MaxOverlaps = 16;
+	float Adjustment[MaxOverlaps] = {};
+	int OverlapMinIndex[MaxOverlaps] = {};
+	int Collisions = 0;
+	for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
 	{
-		bool CollisonsFound = false;
-		for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
+		entity* TestEntity = &GameState->Entities[EntityIndex];
+		if(EntityIndex != CollideEntity->Index)
 		{
-			entity* TestEntity = &GameState->Entities[EntityIndex];
-			if(EntityIndex != CollideEntity->Index)
+			bool Collided = CollisionCheckPair(Epsilon, CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
+			
+			if(Collided)
 			{
-				bool Collided = CollisionCheckPair(Epsilon, CollideEntity->X, CollideEntity->Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
-				
-				if(Collided)
+				float OverlapRight = ((TestEntity->X + TestEntity->Width) - (CollideEntity->X - Epsilon));//Right Side Hit
+				float OverlapLeft = ((CollideEntity->X + CollideEntity->Width + Epsilon) - TestEntity->X);//Left Side Hit
+				float OverlapBottom = ((CollideEntity->Y + CollideEntity->Height + Epsilon) - TestEntity->Y); //Bottom Side Hit
+				float OverlapTop = ((TestEntity->Y + TestEntity->Height) - (CollideEntity->Y  - Epsilon));//TopSide Hit
+				float OverlapAmounts[MAX_OVERLAPS] = {OverlapRight, OverlapLeft, OverlapBottom, OverlapTop};
+				float OverlapMin = OverlapAmounts[0];
+		
+				OverlapMinIndex[Collisions] = 0;
+				for(int OverlapIndex = 1; OverlapIndex < MAX_OVERLAPS; OverlapIndex++)
 				{
-					if(Pass == 2)
+					if(OverlapAmounts[OverlapIndex] < OverlapMin)
 					{
-						#if 0
-						for(int OverlapIndex = 0; OverlapIndex < 2; OverlapIndex++)
-						{
-							switch(OverlapMinIndex[OverlapIndex])
-							{
-								case 0: CollideEntity->X += Adjustment[OverlapIndex]; break;
-								case 1: CollideEntity->X -= Adjustment[OverlapIndex]; break;
-								case 2: CollideEntity->Y -= Adjustment[OverlapIndex]; break;
-								case 3: CollideEntity->Y += Adjustment[OverlapIndex]; break;
-							}
-						}
-						//Assert((InitialP.X == CollideEntity->X) && (InitialP.Y == CollideEntity->Y));
-						#else
-						CollideEntity->X = InitialP.X;
-						CollideEntity->Y = InitialP.Y;
-						#endif
-						break;
+						OverlapMin = OverlapAmounts[OverlapIndex];
+						OverlapMinIndex[Collisions] = OverlapIndex;
 					}
-					
-					if(Pass > 0 && OverlapMinIndex[Pass - 1] >= 0)
-					{
-						switch(OverlapMinIndex[Pass - 1])
-						{
-							#if 0
-							case 0: CollideEntity->X -= Adjustment[Pass - 1];  break;
-							case 1: CollideEntity->X += Adjustment[Pass - 1];  break;
-							case 2: CollideEntity->Y += Adjustment[Pass - 1];  break;
-							case 3: CollideEntity->Y -= Adjustment[Pass - 1];  break;
-							#else
-							case 0: CantBeX = true; CollideEntity->X -= Adjustment[Pass - 1]; break;
-							case 1: CantBeX = true; CollideEntity->X += Adjustment[Pass - 1]; break;
-							case 2: CantBeY = true; CollideEntity->Y += Adjustment[Pass - 1]; break;
-							case 3: CantBeY = true; CollideEntity->Y -= Adjustment[Pass - 1]; break;
-							#endif
-						}
-					}
-					float OverlapRight = ((TestEntity->X + TestEntity->Width) - (CollideEntity->X - Epsilon));//Right Side Hit
-					float OverlapLeft = ((CollideEntity->X + CollideEntity->Width + Epsilon) - TestEntity->X);//Left Side Hit
-					float OverlapBottom = ((CollideEntity->Y + CollideEntity->Height + Epsilon) - TestEntity->Y); //Bottom Side Hit
-					float OverlapTop = ((TestEntity->Y + TestEntity->Height) - (CollideEntity->Y  - Epsilon));//TopSide Hit
-					float OverlapAmounts[MAX_OVERLAPS] = {OverlapRight, OverlapLeft, OverlapBottom, OverlapTop};
-					float OverlapMin = OverlapAmounts[0];
-					
-					#if 0
-					if(CantBeX)
-					{
-						OverlapMin = OverlapBottom;
-						OverlapMinIndex[Pass] = 2;
-						if(OverlapTop < OverlapBottom)
-						{
-							OverlapMin = OverlapTop;
-							OverlapMinIndex[Pass] = 3;
-						}
-					}
-					else if(CantBeY)
-					{
-						OverlapMin = OverlapRight;
-						OverlapMinIndex[Pass] = 0;
-						if(OverlapLeft < OverlapRight) 
-						{
-							OverlapMin = OverlapLeft;
-							OverlapMinIndex[Pass] = 1;
-						}
-					}
-					else
-					#endif
-					{
-						OverlapMinIndex[Pass] = 0;
-						for(int OverlapIndex = 1; OverlapIndex < MAX_OVERLAPS; OverlapIndex++)
-						{
-							if(OverlapAmounts[OverlapIndex] < OverlapMin)
-							{
-								OverlapMin = OverlapAmounts[OverlapIndex];
-								OverlapMinIndex[Pass] = OverlapIndex;
-							}
-						}
-					}
-					
-					Adjustment[Pass] = (OverlapMin);
-					//v2* Velocity = &CollideEntity->Velocity;
-					switch(OverlapMinIndex[Pass])
-					{
-						case 0: 
-						{
-							CollideEntity->X += Adjustment[Pass]; 
-							//Velocity->X = 0;
-							//if(Velocity->Y > GlideSpeed)  Velocity->Y = GlideSpeed;
-							//if(Velocity->Y < -GlideSpeed) Velocity->Y = -GlideSpeed;
-						}						
-						break;
-						case 1: 
-						{
-							CollideEntity->X -= Adjustment[Pass]; 
-							//Velocity->X = 0;
-							//if(Velocity->Y > GlideSpeed)  Velocity->Y = GlideSpeed;
-							//if(Velocity->Y < -GlideSpeed) Velocity->Y = -GlideSpeed;
-						}
-						break;
-						case 2: 
-						{
-							CollideEntity->Y -= Adjustment[Pass]; 
-							//Velocity->Y = 0;
-							//if(Velocity->X > GlideSpeed)  Velocity->X = GlideSpeed;
-							//if(Velocity->X < -GlideSpeed) Velocity->X = -GlideSpeed;
-						}						
-						break;
-						case 3:
-						{
-							CollideEntity->Y += Adjustment[Pass]; 
-							//Velocity->Y = 0;
-							//if(Velocity->X > GlideSpeed)  Velocity->X = GlideSpeed;
-							//if(Velocity->X < -GlideSpeed) Velocity->X = -GlideSpeed;
-						}
-						break;
+				}
+				
+				Adjustment[Collisions] = (OverlapMin);
+				Collisions++;
+				
+			}
+			
+		}
+	}
+	
+	if(Collisions)
+	{
+		for(int Index = 0; Index < MaxOverlaps; Index ++)
+		{
+			v2 PotentialMove = {CollideEntity->X, CollideEntity->Y};
+			v2* Velocity = &CollideEntity->Velocity;
+			switch(OverlapMinIndex[Index])
+			{
+				case 0: 
+					PotentialMove.X += Adjustment[Index]; 
+				break;
+				case 1: 
+					PotentialMove.X -= Adjustment[Index]; 
+				break;
+				case 2: 
+					PotentialMove.Y -= Adjustment[Index]; 
+				break;
+				case 3: 
+					PotentialMove.Y += Adjustment[Index]; 
+				break;
+				
+			}
+
+			bool Collided = false;
+			for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
+			{
+				entity* TestEntity = &GameState->Entities[EntityIndex];
+				if(EntityIndex != CollideEntity->Index)
+				{
+					Collided = CollisionCheckPair(Epsilon, PotentialMove.X, PotentialMove.Y, CollideEntity->Width, CollideEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
+					if(Collided) break;
+				}
+			}
+			
+			if(!Collided) 
+			{
+				CollideEntity->X = PotentialMove.X;
+				CollideEntity->Y = PotentialMove.Y;
+				switch(OverlapMinIndex[Index])
+				{
+					case 0: 
+						Velocity->X = 0;
+						if(Velocity->Y > GlideSpeed) Velocity->Y = GlideSpeed;
+						if(Velocity->Y < -GlideSpeed) Velocity->Y = -GlideSpeed;
+					break;
+					case 1:
+						Velocity->X = 0;
+						if(Velocity->Y > GlideSpeed) Velocity->Y = GlideSpeed;
+						if(Velocity->Y < -GlideSpeed) Velocity->Y = -GlideSpeed;
+					break;
+					case 2: 
+						Velocity->Y = 0;
+						if(Velocity->X > GlideSpeed) Velocity->X = GlideSpeed;
+						if(Velocity->X < -GlideSpeed) Velocity->X = -GlideSpeed;
+					break;
+					case 3: 
+						Velocity->Y = 0;
+						if(Velocity->X > GlideSpeed) Velocity->X = GlideSpeed;
+						if(Velocity->X < -GlideSpeed) Velocity->X = -GlideSpeed;
 						
-					}
-					
-					CollisonsFound = true;
 					break;
 				}
 				
+				break;
 			}
+			else if(Index == MaxOverlaps - 1)
+			{
+				CollideEntity->X = InitialP.X;	
+				CollideEntity->Y = InitialP.Y;				
+			}
+
 		}
-		
-		if(!CollisonsFound) break;
 	}
+
 	
 }
 void MoveAndResolveCollision(game_state* GameState, entity* CollideEntity, float Epsilon, float GlideSpeed, float DT)
@@ -625,9 +591,11 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, input* Input, entity* Co
 	if(Velocity->Y < -60.0f) Velocity->Y = -60.0f;
 #endif
 
+#if 0
 	float Speed = 128.0f;
 	Velocity->X = AccelInput.X * Speed;
 	Velocity->Y = AccelInput.Y * Speed;
+#endif
 	
 	float Epsilon = 10.0f;
 	float GlideSpeed = 100.0f;
