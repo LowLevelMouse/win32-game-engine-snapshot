@@ -282,8 +282,8 @@ void InitGameState(memory* Memory, GLuint* ShaderProgram)
 	Memory->GameState = PushStruct(&Memory->PermanentMemory, game_state);
 	game_state* GameState = Memory->GameState;
 	
-	float PlayerWidth = 640 - 2*150;
-	float PlayerHeight = 480 - 2*150;
+	float PlayerWidth = 480 - 2*150;//640 - 2*150;
+	float PlayerHeight = PlayerWidth;
 	GameState->PlayerEntityIndex = AddEntity(GameState->Entities, &GameState->EntityCount, 0.0f, 0.0f, PlayerWidth, PlayerHeight, Entity_Type_Player); //340 Width 180 Height //400 GenWidth 200 GenHeight 300 GenPadX 150 GenPadY
 	entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
 
@@ -821,14 +821,14 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		
 		if(CurrEntity->Type == Entity_Type_Player)
 		{
-			SetAndUploadQuadVertices(CurrEntity);
-			//triangle Triangle = SetAndUploadRotatedTraingleVertices(CurrEntity);
-			//glDrawArrays(GL_TRIANGLES, 0, 3);
-			glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+			//SetAndUploadQuadVertices(CurrEntity);
+			triangle Triangle = SetAndUploadRotatedTraingleVertices(CurrEntity);
+			glDrawArrays(GL_TRIANGLES, 0, 3);
+			//glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 			
 			v2 Offset = RadialEmission(2.5f);
-		   // EmitParticle(&GameState->ParticleSystem, Triangle.CCW.X + Offset.X , Triangle.CCW.Y + Offset.Y);
-			//EmitParticle(&GameState->ParticleSystem, Triangle.CW.X + Offset.X , Triangle.CW.Y + Offset.Y);
+		    EmitParticle(&GameState->ParticleSystem, Triangle.CCW.X + Offset.X , Triangle.CCW.Y + Offset.Y);
+			EmitParticle(&GameState->ParticleSystem, Triangle.CW.X + Offset.X , Triangle.CW.Y + Offset.Y);
 
 		}
 		else if (CurrEntity->Type == Entity_Type_Other)
