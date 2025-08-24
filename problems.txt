@@ -7,8 +7,7 @@ are grinding into two rectanlges from the bottom. The left rectangle in this cas
 which may also be causing the issue, if it collided with the right rectangle first it would work fine but that may 
 be too uncertain.
 
-Solution:
-Resolving one axis at a time solves this issue but this also breaks sliding into another moving entity. It causes us to teleport when we are sliding into the edge of another moving entity. We use a hybrid approach. We do per-axis movement, but Minimum Translation Vector resoloution instead of per-axis. So MoveX -> Resolve alll axes -> MoveY ->Resolve all axes
+Solution: Find MTV for a set number of collisions, chose the candidate that doensn't leave the entity overlapping. If no candidates work, revert the entity back to it's old position.
 
 
 3.When you release a diagonal movement it "snaps" because for a brief moment you still have one key pressed. We added a timer to the code so that the rotation only starts if the key has been held for a certain amount of time. Seems to be the least cruft solution.

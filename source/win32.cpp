@@ -8,13 +8,6 @@
 
 #include "win32.h"
 
-
-static GLuint gFboScene = 0;
-static GLuint gTexScen = 0;
-static GLuint gSceneW = 0, gSceenH = 0;
-
-void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram);
-
 extern "C" 
 {
     // NVIDIA
@@ -94,7 +87,7 @@ LRESULT CALLBACK WindowProc(HWND WindowHandle, UINT Msg, WPARAM WParam, LPARAM L
 	
 }
 	
-HWND WindowInitialization(HINSTANCE hInstance)
+HWND WindowInitialization(HINSTANCE hInstance, v2 ClientArea)
 {
 	WNDCLASS WindowClass = {};
 	WindowClass.lpfnWndProc = WindowProc;
@@ -111,7 +104,7 @@ HWND WindowInitialization(HINSTANCE hInstance)
 	}
 	
 	HWND WindowHandle = CreateWindowEx(0, WindowClass.lpszClassName, "Win32", WS_OVERLAPPEDWINDOW, 
-									   CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, NULL, NULL, hInstance, NULL);
+									   CW_USEDEFAULT, CW_USEDEFAULT, (int)ClientArea.X, (int)ClientArea.Y, NULL, NULL, hInstance, NULL);
 	if(WindowHandle == 0)
 	{
 		Dialog("Could not create the window \nReturn %p", WindowHandle); 
@@ -220,7 +213,7 @@ HGLRC InitializeOpenGL(HDC WindowDC)
 }
 
 
-void PrepFrame(GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float* Vertices, size_t VerticesSize)
+void PrepFrame(GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float* Vertices, size_t VerticesSize, v2 ClientArea)
 {
 	unsigned int QuadIndices[] =
 	{
@@ -291,7 +284,7 @@ void PrepFrame(GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float* Vertices,
 	glDeleteShader(VertexShader);
 	glDeleteShader(FragmentShader);
 	
-	glViewport(0, 0, 640, 480);
+	glViewport(0, 0, (int)ClientArea.X, (int)ClientArea.Y);
 
 }
 
@@ -562,7 +555,8 @@ memory InitializeMemory()
 }
 
 ///
-//NEED TO MAKE TIMING ROBUST!!!
+//NEED TO MAKE TIMING ROBUST!!! 
+//CURRENTLY WE ARE AT 240FPS Vsync, everything is 4 times a fast as our hardcoded 1/60.0f timestep, we need to deal with this
 ///
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
@@ -577,7 +571,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	}
 
 	//Window Initialization
-	HWND WindowHandle = WindowInitialization(hInstance);
+	//v2 ClientArea = {1280, 720};
+	v2 ClientArea = {1920, 1080};
+	HWND WindowHandle = WindowInitialization(hInstance, ClientArea);
 	if(!WindowHandle)
 	{
 		return EXIT_FAILURE;
@@ -649,7 +645,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		0, 0, 0, 0,
 	};
 	int DummyVerticesSize = sizeof(DummyVerticies);
-	PrepFrame(&VAO, &VBO, &ShaderProgram, DummyVerticies, DummyVerticesSize);
+	PrepFrame(&VAO, &VBO, &ShaderProgram, DummyVerticies, DummyVerticesSize, ClientArea);
 	
 	//Make the window visible and force a repaint
 	ShowWindow(WindowHandle, nCmdShow);
@@ -663,6 +659,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	win32_input Win32Input = {};
 	input Input = {};
 	
+	double SecondsElapsed = 0;
 	LARGE_INTEGER LastCounter = {};
 	QueryPerformanceCounter(&LastCounter);
 	
@@ -680,7 +677,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		PollInput(&Win32Input);
 		MapWin32InputToGame(&Input, &Win32Input);
 		
-		UpdateAndRender(&Memory, &Input, &VAO, &VBO, &ShaderProgram);
+		//For now we truncate the dt to a float
+		UpdateAndRender(&Memory, &Input, &VAO, &VBO, &ShaderProgram, (float)SecondsElapsed);
 		
 		StoreInputState(&Input);
 		
@@ -690,7 +688,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		LARGE_INTEGER CurrentCounter = {};
 		QueryPerformanceCounter(&CurrentCounter);
 
-		double SecondsElapsed = (double)(CurrentCounter.QuadPart - LastCounter.QuadPart) * SecondsPerTick;
+		SecondsElapsed = (double)(CurrentCounter.QuadPart - LastCounter.QuadPart) * SecondsPerTick;
 		LastCounter = CurrentCounter;
 		
 		char Buffer[256];

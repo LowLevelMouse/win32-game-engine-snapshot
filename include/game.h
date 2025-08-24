@@ -13,16 +13,10 @@
 
 #define MAX_OVERLAPS 4
 #define ENTITY_MAX 1000
+#define NPC_MAX 100
 #define IMAGES_MAX 2
 
 #define MAX_PARTICLES 2048
-
-struct v2
-{
-	float X;
-	float Y;
-};
-
 
 struct particle
 {
@@ -113,8 +107,10 @@ struct game_state
 	bool IsInit;
 	
 	
-	int NpcEntityIndex[3];
+	int NpcEntityIndex[NPC_MAX];
 	int NpcCount;
+	float NpcSpawnTimer;
+	float NpcSpawnInterval;
 	
 	GLuint BackgroundTexture;
 	GLuint ParticleTexture;

@@ -205,12 +205,17 @@ int AddEntity(entity* Entities, int* EntityCount, float X, float Y, float Width,
 
 int AddNpc(game_state* GameState, entity* Entities, int* EntityCount, float X, float Y, float Width, float Height, entity_type Type)
 {
-	int NpcIndex = AddEntity(Entities, EntityCount, X, Y, Width, Height, Type);
-	entity* Npc = &GameState->Entities[NpcIndex];
-	Npc->PathingTimerMax = 3.0f;
-	Npc->PathingTimer = Npc->PathingTimerMax;
-	Npc->Velocity = {1.0f, 1.0f};
-	GameState->NpcCount++;
+	int NpcIndex = -1;
+	if(GameState->NpcCount < NPC_MAX)
+	{
+		NpcIndex = AddEntity(Entities, EntityCount, X, Y, Width, Height, Type);
+		GameState->NpcEntityIndex[GameState->NpcCount] = NpcIndex;
+		entity* Npc = &GameState->Entities[NpcIndex];
+		Npc->PathingTimerMax = 3.0f;
+		Npc->PathingTimer = Npc->PathingTimerMax;
+		Npc->Velocity = {1.0f, 1.0f};
+		GameState->NpcCount++;
+	}
 	return NpcIndex;
 }
 
@@ -290,13 +295,15 @@ void InitGameState(memory* Memory, GLuint* ShaderProgram)
 	GameState->PlayerTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../brick_test.png", Image_Option_Premultiply);
 	PlayerEntity->ImageIndex = GameState->PlayerTextureIndex;
 	
-	GameState->NpcEntityIndex[0]= AddNpc(GameState, GameState->Entities, &GameState->EntityCount, -PlayerWidth - 20.0f, 0, PlayerWidth, PlayerHeight, Entity_Type_Player);
+	//GameState->NpcEntityIndex[0]= AddNpc(GameState, GameState->Entities, &GameState->EntityCount, -PlayerWidth - 20.0f, 0, PlayerWidth, PlayerHeight, Entity_Type_Player);
 	//GameState->NpcEntityIndex[1]= AddNpc(GameState,GameState->Entities, &GameState->EntityCount, 0, -PlayerHeight - 20.0f, PlayerWidth, PlayerHeight, Entity_Type_Player);
 	//GameState->NpcEntityIndex[2]= AddNpc(GameState, GameState->Entities, &GameState->EntityCount, -PlayerWidth - 20.0f, -PlayerHeight - 20.0f, PlayerWidth, PlayerHeight, Entity_Type_Player);
 	
 	GameState->ParticleTextureIndex = AddImage(GameState->Images, &GameState->ImageCount, "../particle_high_res.png", Image_Option_None);
 	
-	PopulateWorld(GameState->Entities, &GameState->EntityCount);
+	//PopulateWorld(GameState->Entities, &GameState->EntityCount);
+	
+	GameState->NpcSpawnInterval = 5.0f;
 	
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // For premultiplied alpha
@@ -435,9 +442,10 @@ void ResolveCollision(game_state* GameState, entity* CollideEntity, v2 InitialP,
 		}
 	}
 	
+	//Assert(Collisions <= 5);
 	if(Collisions)
 	{
-		for(int Index = 0; Index < MaxOverlaps; Index ++)
+		for(int Index = 0; Index < Collisions; Index ++)
 		{
 			v2 PotentialMove = {CollideEntity->X, CollideEntity->Y};
 			v2* Velocity = &CollideEntity->Velocity;
@@ -500,7 +508,8 @@ void ResolveCollision(game_state* GameState, entity* CollideEntity, v2 InitialP,
 				
 				break;
 			}
-			else if(Index == MaxOverlaps - 1)
+			
+			if(Collided && (Index == Collisions - 1))
 			{
 				CollideEntity->X = InitialP.X;	
 				CollideEntity->Y = InitialP.Y;				
@@ -521,6 +530,7 @@ void MoveAndResolveCollision(game_state* GameState, entity* CollideEntity, float
 	CollideEntity->Y += Velocity->Y * DT;
 	//if(IsPlayer) Camera->Y += Velocity->Y * DT;
 	
+	if((CollideEntity->X != InitialP.X) || (CollideEntity->Y != InitialP.Y))
 	ResolveCollision(GameState, CollideEntity, InitialP, Epsilon, GlideSpeed);
 }
 
@@ -551,7 +561,7 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, input* Input, entity* Co
 	{
 		CollideEntity->HoldTime += DT;
 	}
-;	float AcceptThreshold = 0.1f;
+;	float AcceptThreshold = 0.01f;
 
 	//If we aren't moving we need to 0 out LastAccel since our velcoity is based off that
 	if((AccelInput.X == 0) && (AccelInput.Y == 0)) 
@@ -565,31 +575,31 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, input* Input, entity* Co
 	{
 		CollideEntity->LastAccel = AccelInput;
 		float TargetAngle = atan2f(AccelInput.Y, AccelInput.X);
-		float TurnSpeed = 4.0f;
+		float TurnSpeed = 16.0f;
 		CollideEntity->Angle = RotateTowards(CollideEntity->Angle, TargetAngle, TurnSpeed * DT);
 	}
 
 	v2* Velocity = &CollideEntity->Velocity;
 		
 	float AccelRate = 128.0f;	
-	Velocity->X += CollideEntity->LastAccel.X * AccelRate * DT;
-	Velocity->Y += CollideEntity->LastAccel.Y * AccelRate * DT;
+	Velocity->X += CollideEntity->LastAccel.X * AccelRate;
+	Velocity->Y += CollideEntity->LastAccel.Y * AccelRate;
 	
-	float Drag = 0.99f;
+	//float StopThreshold = 2.0f;
+	//Need to clarify this more
+	float Drag = powf(0.1f, DT);
 	Velocity->X *= Drag;
+	//if( (Velocity->X < StopThreshold) && (Velocity->X >- StopThreshold) )  Velocity->X = 0;
 	Velocity->Y *= Drag;
+	//if( (Velocity->Y < StopThreshold) && (Velocity->Y > -StopThreshold) )  Velocity->Y = 0;
 	
-	if(Velocity->X > 200.0f)  Velocity->X = 200.0f;
-	if(Velocity->X < -200.0f) Velocity->X = -200.0f;
-	if(Velocity->Y > 200.0f)  Velocity->Y = 200.0f;
-	if(Velocity->Y < -200.0f) Velocity->Y = -200.0f;
-	
-#if 0
-	if(Velocity->X > 60.0f)  Velocity->X = 60.0f;
-	if(Velocity->X < -60.0f) Velocity->X = -60.0f;
-	if(Velocity->Y > 60.0f)  Velocity->Y = 60.0f;
-	if(Velocity->Y < -60.0f) Velocity->Y = -60.0f;
-#endif
+	//Clamp max speed, we need to re-normalize
+	float Magnitude = sqrtf(Velocity->X * Velocity->X + Velocity->Y * Velocity->Y);
+	if(Magnitude > 500.0f)
+	{
+		Velocity->X = Velocity->X / Magnitude * 500.0f;
+		Velocity->Y = Velocity->Y / Magnitude * 500.0f;
+	}
 
 #if 0
 	float Speed = 128.0f;
@@ -602,31 +612,6 @@ void MoveAndCollisionCheckGlobal(game_state* GameState, input* Input, entity* Co
 	MoveAndResolveCollision(GameState, CollideEntity, Epsilon, GlideSpeed, DT);
 }
 
-void NpcMoveAndCollisionCheck(game_state* GameState, float DT)
-{
-	float Speed = 60.0f;
-	for(int NpcIndexIndex = 0; NpcIndexIndex < GameState->NpcCount; NpcIndexIndex++)
-	{
-		int NpcIndex = GameState->NpcEntityIndex[NpcIndexIndex];
-		entity* Npc = &GameState->Entities[NpcIndex];
-		if(Npc->PathingTimer <= 0.0f)
-		{
-			Npc->Velocity = { (float)((rand() % 3) - 1), (float)((rand() % 3) - 1) };
-			//Npc->Velocity = {1, 0};
-			Npc->PathingTimer = Npc->PathingTimerMax;
-		}
-		else
-		{
-			Npc->X += Npc->Velocity.X * Speed * DT;
-			Npc->Y += Npc->Velocity.Y * Speed * DT;
-			Npc->PathingTimer -= DT;
-		}
-		
-		float Epsilon = 10.0f;
-		float GlideSpeed = 100.0f;
-		MoveAndResolveCollision(GameState, Npc, Epsilon, GlideSpeed, DT);
-	}
-}
 
 void EmitParticle(particle_system* ParticleSystem, float X, float Y)
 {
@@ -740,9 +725,122 @@ void SetAndUploadQuadVertices(entity* CurrEntity)
 	
 }
 
+void NpcMoveAndCollisionCheck(game_state* GameState, float DT)
+{
+	float Speed = 128.0f;
+	for(int NpcIndexIndex = 0; NpcIndexIndex < GameState->NpcCount; NpcIndexIndex++)
+	{
+		int NpcIndex = GameState->NpcEntityIndex[NpcIndexIndex];
+		entity* Npc = &GameState->Entities[NpcIndex];
+		entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
+		//if(Npc->PathingTimer <= 0.0f)
+		{
+			v2 NpcToPlayer = {PlayerEntity->X - Npc->X, PlayerEntity->Y - Npc->Y};
+			float Magnitude = sqrtf(NpcToPlayer.X * NpcToPlayer.X + NpcToPlayer.Y * NpcToPlayer.Y);
+			NpcToPlayer.X /= Magnitude;
+			NpcToPlayer.Y /= Magnitude;
+			
+			Npc->Velocity.X = NpcToPlayer.X * Speed;
+			Npc->Velocity.Y = NpcToPlayer.Y * Speed;
+			
+			//Npc->Velocity = { (float)((rand() % 3) - 1), (float)((rand() % 3) - 1) };
+			//Npc->Velocity = {1, 0};
+			//Npc->PathingTimer = Npc->PathingTimerMax;
+		}
+		//else
+		{
+			//Npc->X += Npc->Velocity.X * Speed * DT;
+			//Npc->Y += Npc->Velocity.Y * Speed * DT;
+			//Npc->PathingTimer -= DT;
+		}
+		
+		float TargetAngle = atan2f(Npc->Velocity.Y, Npc->Velocity.X);
+		float TurnSpeed = 16.0f;
+		Npc->Angle = RotateTowards(Npc->Angle, TargetAngle, TurnSpeed * DT);
+		
+		float Epsilon = 10.0f;
+		float GlideSpeed = 100.0f;
+		
+		MoveAndResolveCollision(GameState, Npc, Epsilon, GlideSpeed, DT);
+	}
+}
+
+//ADD "tries" here so we dont get stuck forever
+#if 1
+void SpawnNpc(game_state* GameState, camera Camera, float DT)
+{
+	entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
+	bool Collided = false;
+	int Face = 0;
+	v2 NpcPos = {};
+	do
+	{
+		Face = rand() % 4;
+		NpcPos = {};
+		switch(Face)
+		{
+			case 0: //Left
+			{
+				int OffsetY = rand() % (int)Camera.Y;
+				NpcPos.X = Camera.X;
+				NpcPos.Y = Camera.Y + OffsetY;
+			}
+			break;
+			case 1: //Bottom
+			{
+				int OffsetX = rand() % (int)Camera.X;
+				NpcPos.X = Camera.X + OffsetX;
+				NpcPos.Y = Camera.Y;
+			}
+			break;
+			case 2: //Right
+			{
+				int OffsetY = rand() % (int)Camera.Y;
+				NpcPos.X = Camera.X + Camera.Width;
+				NpcPos.Y = Camera.Y + OffsetY;
+			}
+			break;
+			case 3: //Top
+			{
+				int OffsetX = rand() % (int)Camera.X;
+				NpcPos.X = Camera.X + OffsetX;
+				NpcPos.Y = Camera.Y + Camera.Height;
+			}
+			break;
+		}
+		
+		for(int EntityIndex = 0; EntityIndex < GameState->EntityCount; EntityIndex++)
+		{
+			float Epsilon = 10.0f;
+			entity* TestEntity = &GameState->Entities[EntityIndex];
+			Collided = CollisionCheckPair(Epsilon, NpcPos.X, NpcPos.Y, PlayerEntity->Width, PlayerEntity->Height, TestEntity->X, TestEntity->Y, TestEntity->Width, TestEntity->Height);
+			if(Collided) break;
+		}
+	}
+	while(Collided);
+	
+	int NpcIndex = AddNpc(GameState, GameState->Entities, &GameState->EntityCount, NpcPos.X, NpcPos.Y, PlayerEntity->Width, PlayerEntity->Height, Entity_Type_Player);
+	entity* Npc = &GameState->Entities[NpcIndex];
+	
+	v2 NpcToPlayer = {PlayerEntity->X - Npc->X, PlayerEntity->Y - Npc->Y};
+	float Magnitude = sqrtf(NpcToPlayer.X * NpcToPlayer.X + NpcToPlayer.Y * NpcToPlayer.Y);
+	NpcToPlayer.X /= Magnitude;
+	NpcToPlayer.Y /= Magnitude;
+	
+	float Speed = 128.0f;
+	Npc->Velocity.X = NpcToPlayer.X * Speed;
+	Npc->Velocity.Y = NpcToPlayer.Y * Speed;
+	
+	float TargetAngle = atan2f(NpcToPlayer.Y, NpcToPlayer.X);
+	float TurnSpeed = 16.0f;
+	Npc->Angle = RotateTowards(Npc->Angle, TargetAngle, TurnSpeed * DT);
+	
+}
+#endif
+
 //UPDATE IMAGE LOAD FAILED CASE
 ///NEED TO MAKE TIMING ROBUST!!!
-void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram)
+void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float DT)
 {
 	
 	if(!Memory->IsGameStateInit)
@@ -750,19 +848,13 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		InitGameState(Memory, ShaderProgram);
 	}
 	
-	float DT = 1.0f / 60.0f;
-	
 	game_state* GameState = Memory->GameState;
 	entity* PlayerEntity = &GameState->Entities[GameState->PlayerEntityIndex];
 	image* PlayerImage = &GameState->Images[PlayerEntity->ImageIndex];
-	image* ParticleImage = &GameState->Images[GameState->ParticleTextureIndex];
+	//image* ParticleImage = &GameState->Images[GameState->ParticleTextureIndex];
 	
-	
-	MoveAndCollisionCheckGlobal(GameState, Input, PlayerEntity, DT);
-	NpcMoveAndCollisionCheck(GameState, DT);
-	
-	float CameraWidth = 640 * 1.5f;
-	float CameraHeight = 480 * 1.5f;
+	float CameraWidth = 1920;//640 * 1.5f;
+	float CameraHeight = 1808;//480 * 1.5f;
 	
 	float HalfW = CameraWidth / 2.0f;
 	float HalfH = CameraHeight / 2.0f;
@@ -771,6 +863,22 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 	float CenterCameraY = PlayerEntity->Y + PlayerEntity->Height / 2.0f;
 	
 	camera Camera = {CenterCameraX - HalfW, CenterCameraY - HalfH, CameraWidth, CameraHeight};
+	#if 1
+	if(GameState->NpcSpawnTimer > GameState->NpcSpawnInterval)
+	{
+		if(GameState->NpcCount < NPC_MAX)
+		{
+			SpawnNpc(GameState, Camera, DT);
+		}
+		GameState->NpcSpawnTimer = 0;
+	}
+	else
+	{
+		GameState->NpcSpawnTimer += DT;
+	}
+	#endif
+	MoveAndCollisionCheckGlobal(GameState, Input, PlayerEntity, DT);
+	NpcMoveAndCollisionCheck(GameState, DT);
 	
 	float ProjMatrix[16];
 	OrthographicProjectionMatrix(ProjMatrix, Camera.X, Camera.Y, Camera.X + Camera.Width, Camera.Y + Camera.Height);
@@ -826,9 +934,9 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 			glDrawArrays(GL_TRIANGLES, 0, 3);
 			//glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 			
-			v2 Offset = RadialEmission(2.5f);
-		    EmitParticle(&GameState->ParticleSystem, Triangle.CCW.X + Offset.X , Triangle.CCW.Y + Offset.Y);
-			EmitParticle(&GameState->ParticleSystem, Triangle.CW.X + Offset.X , Triangle.CW.Y + Offset.Y);
+			//v2 Offset = RadialEmission(2.5f);
+		    //EmitParticle(&GameState->ParticleSystem, Triangle.CCW.X + Offset.X , Triangle.CCW.Y + Offset.Y);
+			//EmitParticle(&GameState->ParticleSystem, Triangle.CW.X + Offset.X , Triangle.CW.Y + Offset.Y);
 
 		}
 		else if (CurrEntity->Type == Entity_Type_Other)
@@ -838,6 +946,7 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 		}
 	}
 	
+	#if 0
 	//Particle Render
 	glBlendFunc(GL_ONE, GL_ONE);
 	glBindTexture(GL_TEXTURE_2D, ParticleImage->TextureID);
@@ -863,7 +972,8 @@ void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLu
 			
 		}
 		
-	}	
+	}
+	#endif
 	
 	UpdateParticles(&GameState->ParticleSystem, DT);
 }

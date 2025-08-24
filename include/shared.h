@@ -50,10 +50,13 @@ struct input
 	bool WasDown[Button_Count];
 };
 
+struct v2
+{
+	float X;
+	float Y;
+};
 
 
-typedef void update_and_render(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram);
-
-
+void UpdateAndRender(memory* Memory, input* Input, GLuint* VAO, GLuint* VBO, GLuint* ShaderProgram, float DT);
 
 #endif
