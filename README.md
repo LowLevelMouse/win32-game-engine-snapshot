@@ -4,16 +4,18 @@
 
 ## How to Run
 
-Run the `build.bat` file in the project root, then execute `win32.exe`.
+Run the `build.bat` file in the project root, then execute `win32.exe`
 
 ---
 
 ## How to Play
 Use the arrow keys to move the triangle player around
 
+Npc triangles will spawn every so often and follow the player
+
 ---
 
-## Features
+## Features (this list is frequently out of date)
 
 - Creates a basic Win32 window with a message pump and callback handler
 - Custom memory allocator using an arena built on top of `VirtualAlloc`
