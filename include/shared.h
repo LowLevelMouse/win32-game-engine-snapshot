@@ -1,3 +1,5 @@
+// © 2025 Justin Wegner – All Rights Reserved
+// This code is provided for evaluation only. Not open source, not for reuse.
 #ifndef SHARED_H
 #define SHARED_H
 

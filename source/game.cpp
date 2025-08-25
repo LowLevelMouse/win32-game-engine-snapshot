@@ -1,3 +1,5 @@
+// © 2025 Justin Wegner – All Rights Reserved
+// This code is provided for evaluation only. Not open source, not for reuse.
 #include "game.h"
 
 float UInt255To1(uint32_t Value)

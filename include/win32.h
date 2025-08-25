@@ -1,3 +1,5 @@
+// © 2025 Justin Wegner – All Rights Reserved
+// This code is provided for evaluation only. Not open source, not for reuse.
 #ifndef ENGINE_WIN32_H
 #define ENGINE_WIN32_H
 
