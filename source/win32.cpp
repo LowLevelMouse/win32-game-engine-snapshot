@@ -740,6 +740,8 @@ R"(
 	uniform vec3 LightColour;
 	uniform float LightRadius;
 	uniform float Ambient;
+	uniform float FlashAmount;
+	uniform vec4 FlashColour;
 	
 	void main()
 	{
@@ -749,7 +751,10 @@ R"(
 		vec3 lit = mix(vec3(Ambient), LightColour, atten);
 		vec3 color = TexColour.rgb * Colour.rgb * lit;
 		float alpha = TexColour.a * Colour.a;
-		FragColour = vec4(color, alpha);
+		vec4 Composite = vec4(color, alpha);
+		vec4 Flash =  vec4(mix(Composite.rgb, FlashColour.rgb*TexColour.rgb, FlashAmount), alpha);
+		FragColour = Flash;
+		
 	}
 )";
 

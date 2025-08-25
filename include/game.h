@@ -53,6 +53,7 @@ enum entity_type
 	Entity_Type_None,
 	Entity_Type_Player,
 	Entity_Type_Npc,
+	Entity_Type_Projectile,
 	Entity_Type_Other,
 };
 
@@ -93,6 +94,12 @@ struct entity
 	
 	float PathingTimer;
 	float PathingTimerMax;
+	
+	float FlashTimer;
+	float FlashTimerMax; //This is really a "half timer" how long from 0 = 1 and then we go back 1 = 0
+	
+	float TurnSpeed;
+	float Speed;
 };
 
 struct game_state
@@ -124,6 +131,9 @@ struct game_state
 	GLuint LightColourLoc;
 	GLuint LightRadiusLoc;
 	GLuint AmbientLoc;
+	
+	GLuint FlashColourLoc;
+	GLuint FlashAmountLoc;
 	
 	particle_system ParticleSystem;
 	
